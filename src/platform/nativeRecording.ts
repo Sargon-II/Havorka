@@ -15,6 +15,9 @@ export interface RecordingBridgePluginInterface {
   stopService(): Promise<{ stopped: boolean }>;
   checkRecordingPermissions(): Promise<RecordingPermissionsResult>;
   openAppSettings(): Promise<void>;
+  startNativeRecording(options?: { baseName?: string }): Promise<{ started: boolean }>;
+  rotateNativeFile(): Promise<{ rotated: boolean; finishedPath?: string }>;
+  stopNativeRecording(): Promise<{ stopped: boolean; files: string[] }>;
   addListener(
     eventName: 'audioFocusChanged',
     listenerFunc: (event: AudioFocusEvent) => void
@@ -76,3 +79,22 @@ export async function addAudioFocusListener(
   }
   return await RecordingBridge.addListener('audioFocusChanged', callback);
 }
+
+/**
+ * Requirement 6: Native MediaRecorder writing AAC in m4a with file rotation
+ */
+export async function startNativeAudioRecorder(baseName?: string): Promise<{ started: boolean }> {
+  if (!isCapacitorAndroid()) return { started: false };
+  return await RecordingBridge.startNativeRecording({ baseName });
+}
+
+export async function rotateNativeAudioFile(): Promise<{ rotated: boolean; finishedPath?: string }> {
+  if (!isCapacitorAndroid()) return { rotated: false };
+  return await RecordingBridge.rotateNativeFile();
+}
+
+export async function stopNativeAudioRecorder(): Promise<{ stopped: boolean; files: string[] }> {
+  if (!isCapacitorAndroid()) return { stopped: true, files: [] };
+  return await RecordingBridge.stopNativeRecording();
+}
+

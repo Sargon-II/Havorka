@@ -26,18 +26,33 @@ export function isTauriPlatform(): boolean {
 }
 
 /**
- * Detect file extension from MIME type for audio recordings
+ * Detect file extension from MIME type for audio recordings (m4a, webm, ogg, wav)
  */
-export function getAudioExtension(mimeType?: string): string {
-  if (!mimeType) return 'mp3';
+export function getAudioExtension(mimeType?: string): 'm4a' | 'webm' | 'ogg' | 'wav' {
+  if (!mimeType) return 'm4a';
   const lower = mimeType.toLowerCase();
+  if (lower.includes('mp4') || lower.includes('m4a') || lower.includes('aac')) return 'm4a';
   if (lower.includes('webm')) return 'webm';
-  if (lower.includes('ogg')) return 'ogg';
-  if (lower.includes('mp4') || lower.includes('m4a') || lower.includes('aac')) return 'mp4';
+  if (lower.includes('ogg') || lower.includes('opus')) return 'ogg';
   if (lower.includes('wav')) return 'wav';
-  if (lower.includes('mpeg') || lower.includes('mp3')) return 'mp3';
-  return 'mp3';
+  return 'm4a';
 }
+
+/**
+ * Standardize audio MIME type for exporting or streaming
+ */
+export function getAudioMimeType(mimeTypeOrExt?: string): string {
+  if (!mimeTypeOrExt) return 'audio/mp4';
+  const lower = mimeTypeOrExt.toLowerCase();
+  if (lower.includes('mp4') || lower.includes('m4a') || lower === 'm4a' || lower.includes('aac')) {
+    return 'audio/mp4';
+  }
+  if (lower.includes('webm') || lower === 'webm') return 'audio/webm';
+  if (lower.includes('ogg') || lower === 'ogg' || lower.includes('opus')) return 'audio/ogg';
+  if (lower.includes('wav') || lower === 'wav') return 'audio/wav';
+  return 'audio/mp4';
+}
+
 
 /**
  * 2 MB chunk size for streaming large files without large memory allocations

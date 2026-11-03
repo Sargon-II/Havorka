@@ -11,6 +11,17 @@ import {
   addAudioFocusListener,
 } from '../../platform/nativeRecording';
 import { logEvent, setDiagnosticSessionStart } from '../diagnostics/log';
+import { getAudioExtension } from '../../platform/files';
+
+export const AUDIO_MIME_CANDIDATES = [
+  'audio/mp4;codecs=mp4a.40.2',
+  'audio/mp4',
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+  'audio/wav',
+] as const;
 
 export type RecorderStatus = 'idle' | 'recording' | 'paused' | 'interrupted';
 
@@ -335,21 +346,33 @@ export class RobustAudioRecorder {
       // Set up silence detection & audio level analyser
       this.setupAudioAnalysis(this.stream);
 
-      // Select supported audio MIME type
-      const mimeTypes = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/mp4',
-        'audio/ogg;codecs=opus',
-        'audio/wav',
-      ];
+      // Select supported audio MIME type by priority:
+      // 1. audio/mp4;codecs=mp4a.40.2 (AAC, file .m4a)
+      // 2. audio/mp4
+      // 3. audio/webm;codecs=opus
+      // 4. audio/webm
+      // 5. audio/ogg;codecs=opus
+      // 6. audio/ogg
+      // 7. audio/wav
       let selectedMimeType = '';
-      for (const mime of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(mime)) {
+      const candidateChecks: Record<string, boolean> = {};
+
+      for (const mime of AUDIO_MIME_CANDIDATES) {
+        const supported = typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.isTypeSupported === 'function'
+          ? MediaRecorder.isTypeSupported(mime)
+          : false;
+        candidateChecks[mime] = supported;
+        if (supported && !selectedMimeType) {
           selectedMimeType = mime;
-          break;
         }
       }
+
+      // Log format diagnostic info: which format is chosen and isTypeSupported for each candidate
+      const checksSummary = Object.entries(candidateChecks)
+        .map(([m, s]) => `${m}=${s ? 'YES' : 'NO'}`)
+        .join(', ');
+      logEvent('REC_FMT', `selected=${selectedMimeType || 'browser_default'} | checks: [${checksSummary}]`);
+      console.log(`[Recorder] Audio format selected: "${selectedMimeType || 'browser_default'}". Candidates check:`, candidateChecks);
 
       const recorder = selectedMimeType
         ? new MediaRecorder(this.stream, { mimeType: selectedMimeType })
@@ -801,26 +824,98 @@ export class RobustAudioRecorder {
   }
 }
 
+export interface ExportedAudioSegment {
+  segmentIndex: number;
+  partNumber: number; // 1-indexed for filenames
+  blob: Blob;
+  mimeType: string;
+  chunksCount: number;
+}
+
 /**
- * Reconstructs a complete audio Blob from all segments and chunks of a session in IndexedDB
+ * Reconstructs individual audio Blobs for each segment of a session in IndexedDB.
+ * Since AAC/m4a and WebM containers cannot be glued by simple concatenation,
+ * each segment is exported as a standalone valid audio file.
+ */
+export async function exportSessionSegments(sessionId: string): Promise<ExportedAudioSegment[]> {
+  const db = await getDB();
+  const session = await db.get('sessions', sessionId);
+  const chunks = await db.getAllFromIndex('audioChunks', 'by_session', sessionId);
+  if (!chunks || chunks.length === 0) return [];
+
+  // Group chunks by segmentIndex
+  const bySegment = new Map<number, AudioChunkRecord[]>();
+  for (const chunk of chunks) {
+    const list = bySegment.get(chunk.segmentIndex) || [];
+    list.push(chunk);
+    bySegment.set(chunk.segmentIndex, list);
+  }
+
+  const segmentIndices = Array.from(bySegment.keys()).sort((a, b) => a - b);
+  const segments: ExportedAudioSegment[] = [];
+
+  for (let i = 0; i < segmentIndices.length; i++) {
+    const segIdx = segmentIndices[i];
+    const segChunks = bySegment.get(segIdx)!;
+    segChunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+    const meta = session?.segments?.find((s) => s.segmentIndex === segIdx);
+    const mimeType = meta?.mimeType || segChunks[0]?.data?.type || 'audio/mp4';
+    const blobParts = segChunks.map((c) => c.data);
+    const segmentBlob = new Blob(blobParts, { type: mimeType });
+
+    segments.push({
+      segmentIndex: segIdx,
+      partNumber: i + 1,
+      blob: segmentBlob,
+      mimeType,
+      chunksCount: segChunks.length,
+    });
+  }
+
+  return segments;
+}
+
+/**
+ * Reconstructs session audio into a single Blob IF AND ONLY IF there is exactly 1 segment.
+ * If there are multiple segments, returns null because AAC/WebM containers cannot
+ * be glued by simple concatenation without corrupting header atoms/timecodes.
  */
 export async function exportSessionBlob(sessionId: string): Promise<Blob | null> {
-  const db = await getDB();
-  const chunks = await db.getAllFromIndex('audioChunks', 'by_session', sessionId);
-  if (!chunks || chunks.length === 0) return null;
-
-  // Sort chunks by segmentIndex ASC, then chunkIndex ASC
-  chunks.sort((a, b) => {
-    if (a.segmentIndex !== b.segmentIndex) {
-      return a.segmentIndex - b.segmentIndex;
-    }
-    return a.chunkIndex - b.chunkIndex;
-  });
-
-  const blobParts = chunks.map((c) => c.data);
-  const mimeType = chunks[0]?.data?.type || 'audio/webm';
-  return new Blob(blobParts, { type: mimeType });
+  const segments = await exportSessionSegments(sessionId);
+  if (segments.length === 0) return null;
+  if (segments.length === 1) {
+    return segments[0].blob;
+  }
+  // Multiple segments: cannot concatenate containers!
+  console.warn(
+    `[Recorder] Session ${sessionId} has ${segments.length} segments. AAC/WebM segments cannot be concatenated directly.`
+  );
+  return null;
 }
+
+/**
+ * Packs all session segments into a single ZIP archive using JSZip with numbered filenames.
+ */
+export async function exportSessionZip(sessionId: string, baseFilename: string): Promise<Blob> {
+  const JSZipModule = await import('jszip');
+  const JSZip = (JSZipModule as any).default || JSZipModule;
+  const zip = new JSZip();
+  const segments = await exportSessionSegments(sessionId);
+
+  for (const seg of segments) {
+    const ext = getAudioExtension(seg.mimeType);
+    const filename = `${baseFilename}_часть${seg.partNumber}.${ext}`;
+    zip.file(filename, seg.blob);
+  }
+
+  return await zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+}
+
 
 /**
  * Clean up all stored audio chunks for a session after export/saving

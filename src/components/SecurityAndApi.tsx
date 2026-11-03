@@ -374,7 +374,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
         data: base64Data,
         name: file.name,
         size: file.size,
-        mimeType: file.type || 'audio/mp3'
+        mimeType: file.type || 'audio/m4a'
       });
     };
     reader.readAsDataURL(file);

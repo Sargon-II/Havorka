@@ -9,7 +9,10 @@ import {
   RecorderStatus,
   findUnfinishedSessions,
   exportSessionBlob,
+  exportSessionSegments,
+  exportSessionZip,
   cleanupSessionChunks,
+  ExportedAudioSegment,
 } from './recorder';
 import { SessionRecord, getDB } from '../storage/db';
 
@@ -121,20 +124,28 @@ export function useRecorder() {
   }, []);
 
   const recoverSession = useCallback(async (session: SessionRecord): Promise<Blob | null> => {
-    const blob = await exportSessionBlob(session.id);
-    if (blob) {
+    const segments = await exportSessionSegments(session.id);
+    let blob: Blob | null = null;
+    if (segments.length === 1) {
+      blob = segments[0].blob;
       setAudioBlob(blob);
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
-      setCurrentSession(session);
-      setUnfinishedSessions((prev) => prev.filter((s) => s.id !== session.id));
-
-      // Mark session as completed
-      const db = await getDB();
-      session.status = 'completed';
-      session.updatedAt = Date.now();
-      await db.put('sessions', session);
+    } else if (segments.length > 1) {
+      // First segment preview for UI audio player
+      setAudioBlob(segments[0].blob);
+      const url = URL.createObjectURL(segments[0].blob);
+      setAudioUrl(url);
     }
+
+    setCurrentSession(session);
+    setUnfinishedSessions((prev) => prev.filter((s) => s.id !== session.id));
+
+    // Mark session as completed
+    const db = await getDB();
+    session.status = 'completed';
+    session.updatedAt = Date.now();
+    await db.put('sessions', session);
     return blob;
   }, []);
 

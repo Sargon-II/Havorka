@@ -131,4 +131,60 @@ public class RecordingBridgePlugin extends Plugin {
             call.reject("OPEN_SETTINGS_FAILED", ex.getMessage(), ex);
         }
     }
+
+    @PluginMethod
+    public void startNativeRecording(PluginCall call) {
+        String baseName = call.getString("baseName", "recording");
+        RecordingService service = RecordingService.getInstance();
+        if (service == null) {
+            startService(call);
+            service = RecordingService.getInstance();
+        }
+
+        if (service != null) {
+            boolean ok = service.startNativeMediaRecording(baseName);
+            JSObject res = new JSObject();
+            res.put("started", ok);
+            call.resolve(res);
+        } else {
+            call.reject("SERVICE_UNAVAILABLE", "RecordingService is not running");
+        }
+    }
+
+    @PluginMethod
+    public void rotateNativeFile(PluginCall call) {
+        RecordingService service = RecordingService.getInstance();
+        if (service != null && service.isNativeRecording()) {
+            String finishedPath = service.rotateNativeFile();
+            JSObject res = new JSObject();
+            res.put("rotated", finishedPath != null);
+            res.put("finishedPath", finishedPath);
+            call.resolve(res);
+        } else {
+            JSObject res = new JSObject();
+            res.put("rotated", false);
+            call.resolve(res);
+        }
+    }
+
+    @PluginMethod
+    public void stopNativeRecording(PluginCall call) {
+        RecordingService service = RecordingService.getInstance();
+        if (service != null) {
+            java.util.List<String> files = service.stopNativeMediaRecording();
+            JSObject res = new JSObject();
+            res.put("stopped", true);
+            com.getcapacitor.JSArray arr = new com.getcapacitor.JSArray();
+            for (String f : files) {
+                arr.put(f);
+            }
+            res.put("files", arr);
+            call.resolve(res);
+        } else {
+            JSObject res = new JSObject();
+            res.put("stopped", true);
+            res.put("files", new com.getcapacitor.JSArray());
+            call.resolve(res);
+        }
+    }
 }

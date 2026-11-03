@@ -21,7 +21,16 @@ import { Document, Packer, Paragraph, TextRun, AlignmentType, ImageRun } from 'd
 import { usePersistentState } from '../lib/storage/usePersistentState';
 import { getKV, setKV } from '../lib/storage/db';
 import { useRecorder } from '../lib/recording/useRecorder';
-import { exportSessionBlob } from '../lib/recording/recorder';
+import {
+  exportSessionBlob,
+  exportSessionSegments,
+  exportSessionZip,
+  ExportedAudioSegment,
+} from '../lib/recording/recorder';
+import {
+  convertSegmentsToWavBlob,
+  checkWavConversionDuration,
+} from '../lib/recording/wavConverter';
 import { saveFile, getAudioExtension } from '../platform/files';
 import { openNativeAppSettings, isCapacitorAndroid } from '../platform/nativeRecording';
 
@@ -241,8 +250,29 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   const [photoTitle, setPhotoTitle] = useState('');
   const [photoCategory, setPhotoCategory] = useState<'utensils' | 'buildings' | 'costume' | 'inventory' | 'other'>('utensils');
   const [photoAge, setPhotoAge] = useState('');
-  const [photoDescription, setPhotoDescription] = useState('');
   const [micPermissionDenied, setMicPermissionDenied] = useState(false);
+
+  // Multi-segment export modal state (AAC/WebM containers cannot be glued)
+  const [segmentModalData, setSegmentModalData] = useState<{
+    segments: ExportedAudioSegment[];
+    baseFilename: string;
+    isOpen: boolean;
+  }>({ segments: [], baseFilename: '', isOpen: false });
+
+  // WAV confirmation modal (when audio exceeds 60 minutes)
+  const [wavConfirmData, setWavConfirmData] = useState<{
+    blobs: Blob[];
+    durationSec: number;
+    baseFilename: string;
+    isOpen: boolean;
+  }>({ blobs: [], durationSec: 0, baseFilename: '', isOpen: false });
+
+  // WAV conversion in progress state
+  const [wavProgress, setWavProgress] = useState<{
+    isConverting: boolean;
+    percent: number;
+    message: string;
+  }>({ isConverting: false, percent: 0, message: '' });
 
   // States for the inline Template Editor modes (no window.prompts!)
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
@@ -659,9 +689,45 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     }
   };
 
-  const triggerAudioFileDownload = async (blobToDownload: Blob | null) => {
-    const finalBlob = blobToDownload || audioBlob;
-    if (!finalBlob) {
+  const getSessionBaseFilename = () => {
+    const cleanForFilename = (text: string) => {
+      return text
+        .replace(/[^a-zA-Z0-9а-яА-ЯёЁіІўЎ\s_-]/g, '')
+        .trim()
+        .replace(/\s+/g, '_');
+    };
+    const safeInformant = cleanForFilename(sessionInformant) || 'Информант';
+    const safeLocation = cleanForFilename(sessionLocation) || 'Локация';
+    const safeResearcher = cleanForFilename(sessionResearcher) || 'Исследователь';
+    const safeDate = cleanForFilename(sessionDate) || '2026';
+    return `Полевая_аудиозапись_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}`;
+  };
+
+  const downloadAudioRecording = async () => {
+    let stoppedBlob = audioBlob;
+    if (recorderStatus === 'recording' || recorderStatus === 'paused') {
+      stoppedBlob = await stopRecording();
+      setTimerActive(false);
+    }
+
+    const sessionId = currentSession?.id;
+    let segments: ExportedAudioSegment[] = [];
+    if (sessionId) {
+      segments = await exportSessionSegments(sessionId);
+    }
+
+    if (segments.length === 0 && (stoppedBlob || audioBlob)) {
+      const fallbackBlob = (stoppedBlob || audioBlob)!;
+      segments = [{
+        segmentIndex: 0,
+        partNumber: 1,
+        blob: fallbackBlob,
+        mimeType: fallbackBlob.type || 'audio/m4a',
+        chunksCount: 1,
+      }];
+    }
+
+    if (segments.length === 0) {
       showToast(lang === 'ru' 
         ? '⚠️ Вы еще не включали запись или она пуста' 
         : lang === 'by' 
@@ -670,44 +736,142 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
       return;
     }
 
-    const cleanForFilename = (text: string) => {
-      return text
-        .replace(/[^a-zA-Z0-9а-яА-ЯёЁіІўЎ\s_-]/g, '')
-        .trim()
-        .replace(/\s+/g, '_');
-    };
+    const baseName = getSessionBaseFilename();
 
-    const safeInformant = cleanForFilename(sessionInformant) || 'Информант';
-    const safeLocation = cleanForFilename(sessionLocation) || 'Локация';
-    const safeResearcher = cleanForFilename(sessionResearcher) || 'Исследователь';
-    const safeDate = cleanForFilename(sessionDate) || '2026';
-    const ext = getAudioExtension(finalBlob.type);
-
-    const filename = `Полевая_аудиозапись_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.${ext}`;
-
-    try {
-      await saveFile(finalBlob, filename, finalBlob.type || `audio/${ext}`);
-      showToast(lang === 'ru' 
-        ? `Аудиозапись .${ext.toUpperCase()} успешно сохранена!` 
-        : lang === 'by' 
-        ? `Аўдыязапіс .${ext.toUpperCase()} паспяхова захаваны!` 
-        : `Audio recording (.${ext.toUpperCase()}) saved successfully!`);
-    } catch (err: any) {
-      console.error('Failed to download audio file', err);
-      showToast(lang === 'ru' ? `Ошибка сохранения аудио: ${err.message || err}` : `Памылка захавання аўдыя: ${err.message || err}`);
+    if (segments.length === 1) {
+      // Exactly 1 segment: clean single file download
+      const single = segments[0];
+      const ext = getAudioExtension(single.mimeType);
+      const filename = `${baseName}.${ext}`;
+      try {
+        await saveFile(single.blob, filename, single.mimeType || `audio/${ext}`);
+        showToast(lang === 'ru' 
+          ? `Аудиозапись .${ext.toUpperCase()} успешно сохранена!` 
+          : lang === 'by' 
+          ? `Аўдыязапіс .${ext.toUpperCase()} паспяхова захаваны!` 
+          : `Audio recording (.${ext.toUpperCase()}) saved successfully!`);
+      } catch (err: any) {
+        console.error('Failed to download audio file', err);
+        showToast(lang === 'ru' ? `Ошибка сохранения аудио: ${err.message || err}` : `Памылка захавання аўдыя: ${err.message || err}`);
+      }
+    } else {
+      // Multiple segments: cannot concatenate without corrupting container.
+      // Open modal dialog for options (download as ZIP or separate parts)
+      setSegmentModalData({
+        segments,
+        baseFilename: baseName,
+        isOpen: true,
+      });
     }
   };
 
-  const downloadAudioRecording = async () => {
-    let blobToDownload = audioBlob;
+  const handleDownloadZipArchive = async () => {
+    if (!segmentModalData.segments.length) return;
+    const sessionId = currentSession?.id;
+    const baseName = segmentModalData.baseFilename;
+    try {
+      setSegmentModalData(prev => ({ ...prev, isOpen: false }));
+      showToast(lang === 'ru' ? 'Сборка архива ZIP...' : 'Зборка архіва ZIP...');
+      let zipBlob: Blob;
+      if (sessionId) {
+        zipBlob = await exportSessionZip(sessionId, baseName);
+      } else {
+        const JSZipModule = await import('jszip');
+        const JSZip = (JSZipModule as any).default || JSZipModule;
+        const zip = new JSZip();
+        for (const seg of segmentModalData.segments) {
+          const ext = getAudioExtension(seg.mimeType);
+          zip.file(`${baseName}_часть${seg.partNumber}.${ext}`, seg.blob);
+        }
+        zipBlob = await zip.generateAsync({ type: 'blob' });
+      }
+      await saveFile(zipBlob, `${baseName}_аудио_архив.zip`, 'application/zip');
+      showToast(lang === 'ru' ? 'Архив ZIP успешно сохранён!' : 'Архіў ZIP паспяхова захаваны!');
+    } catch (err: any) {
+      console.error('Failed to save ZIP archive', err);
+      showToast(`Ошибка сохранения ZIP: ${err.message || err}`);
+    }
+  };
+
+  const handleDownloadSeparateParts = async () => {
+    const segments = segmentModalData.segments;
+    const baseName = segmentModalData.baseFilename;
+    setSegmentModalData(prev => ({ ...prev, isOpen: false }));
+    try {
+      for (const seg of segments) {
+        const ext = getAudioExtension(seg.mimeType);
+        const filename = `${baseName}_часть${seg.partNumber}.${ext}`;
+        await saveFile(seg.blob, filename, seg.mimeType || `audio/${ext}`);
+      }
+      showToast(lang === 'ru' ? `Все части (${segments.length}) успешно сохранены!` : `Усе часткі (${segments.length}) паспяхова захаваны!`);
+    } catch (err: any) {
+      console.error('Failed to save segment parts', err);
+      showToast(`Ошибка сохранения частей: ${err.message || err}`);
+    }
+  };
+
+  const handleExportWav = async (forceProceed = false) => {
     if (recorderStatus === 'recording' || recorderStatus === 'paused') {
-      blobToDownload = await stopRecording();
+      await stopRecording();
       setTimerActive(false);
     }
-    if (!blobToDownload && currentSession) {
-      blobToDownload = await exportSessionBlob(currentSession.id);
+
+    const sessionId = currentSession?.id;
+    let segments: ExportedAudioSegment[] = [];
+    if (sessionId) {
+      segments = await exportSessionSegments(sessionId);
+    } else if (audioBlob) {
+      segments = [{
+        segmentIndex: 0,
+        partNumber: 1,
+        blob: audioBlob,
+        mimeType: audioBlob.type || 'audio/m4a',
+        chunksCount: 1,
+      }];
     }
-    await triggerAudioFileDownload(blobToDownload);
+
+    if (segments.length === 0) {
+      showToast(lang === 'ru' ? '⚠️ Нет аудиозаписи для экспорта в WAV' : '⚠️ Няма аўдыязапісу для экспарту ў WAV');
+      return;
+    }
+
+    const blobs = segments.map(s => s.blob);
+    const baseName = getSessionBaseFilename();
+
+    if (!forceProceed) {
+      try {
+        const check = await checkWavConversionDuration(blobs);
+        if (check.exceedsLimit) {
+          setWavConfirmData({
+            blobs,
+            durationSec: check.totalDurationSec,
+            baseFilename: baseName,
+            isOpen: true,
+          });
+          return;
+        }
+      } catch (durErr) {
+        console.warn('Duration check failed, continuing with conversion', durErr);
+      }
+    }
+
+    setWavProgress({ isConverting: true, percent: 5, message: 'Инициализация аудио декодера...' });
+    try {
+      const wavBlob = await convertSegmentsToWavBlob(blobs, {
+        onProgress: (percent, message) => {
+          setWavProgress({ isConverting: true, percent, message });
+        }
+      });
+
+      const filename = `${baseName}_16k_mono.wav`;
+      await saveFile(wavBlob, filename, 'audio/wav');
+      showToast(lang === 'ru' ? 'Аудиофайл WAV (16 кГц, моно) успешно сохранён!' : 'Аўдыяфайл WAV (16 кГц, мона) паспяхова захаваны!');
+    } catch (err: any) {
+      console.error('Failed to convert to WAV', err);
+      showToast(`Ошибка конвертации WAV: ${err.message || err}`);
+    } finally {
+      setWavProgress({ isConverting: false, percent: 0, message: '' });
+    }
   };
 
   // Start the device's camera stream for live photofixation
@@ -1227,8 +1391,11 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     });
   };
 
-  const activeQuestion = flatQuestions[activeQuestionIndex];
-  const audioExtLabel = audioBlob ? getAudioExtension(audioBlob.type).toUpperCase() : 'АУДИО';
+  const audioExtLabel = audioBlob
+    ? getAudioExtension(audioBlob.type).toUpperCase()
+    : currentSession?.segments?.[0]?.mimeType
+    ? getAudioExtension(currentSession.segments[0].mimeType).toUpperCase()
+    : 'M4A';
 
   return (
     <div ref={containerRef} className="space-y-10 max-w-7xl mx-auto px-1 md:px-0">
@@ -1539,6 +1706,17 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                 >
                   <FileDown className="w-4 h-4" />
                   {lang === 'ru' ? `Выгрузить ${audioExtLabel}` : lang === 'by' ? `Выгрузіць ${audioExtLabel}` : `Export ${audioExtLabel}`}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleExportWav(false)}
+                  disabled={wavProgress.isConverting}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 bg-sky-700 hover:bg-sky-800 disabled:opacity-50 text-white rounded-lg text-xs font-bold uppercase tracking-wider cursor-pointer flex items-center justify-center gap-2 transition-all"
+                  title="Экспортировать аудиозапись в стандартный формат WAV (16 кГц, моно PCM)"
+                >
+                  <FileDown className="w-4 h-4" />
+                  {lang === 'ru' ? 'Экспорт WAV (16 кГц)' : lang === 'by' ? 'Экспарт WAV (16 кГц)' : 'Export WAV'}
                 </button>
 
                 <button
@@ -2002,6 +2180,15 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                     >
                       <FileDown className="w-4 h-4 shrink-0" />
                       {lang === 'ru' ? `Выгрузить аудиозапись (.${audioExtLabel.toLowerCase()})` : lang === 'by' ? `Выгрузіць аўдыязапіс (.${audioExtLabel.toLowerCase()})` : `Download Audio (.${audioExtLabel.toLowerCase()})`}
+                    </button>
+                    <button
+                      onClick={() => handleExportWav(false)}
+                      disabled={wavProgress.isConverting}
+                      className="flex-1 px-5 py-4 bg-sky-700 hover:bg-sky-800 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 hover:-translate-y-0.5 cursor-pointer shadow-md flex items-center justify-center gap-2"
+                      title="Экспорт в 16 кГц моно WAV"
+                    >
+                      <FileDown className="w-4 h-4 shrink-0" />
+                      {lang === 'ru' ? 'Экспортировать WAV' : lang === 'by' ? 'Экспартаваць WAV' : 'Export WAV'}
                     </button>
                     <button
                       onClick={saveSessionToFieldDiary}
@@ -2478,6 +2665,170 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
 
           </div>
 
+        </div>
+      )}
+
+      {/* Modal for multi-segment audio export */}
+      {segmentModalData.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-stone-200 space-y-4">
+            <div className="flex items-start justify-between gap-3 border-b border-stone-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-stone-900 font-serif">
+                  {lang === 'ru' ? 'Экспорт сегментов записи' : 'Экспарт сегментаў запісу'}
+                </h3>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  {lang === 'ru'
+                    ? `Запись состоит из ${segmentModalData.segments.length} частей (перезапусков/пауз)`
+                    : `Запіс складаецца з ${segmentModalData.segments.length} частак (перазапускаў/паўз)`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSegmentModalData(prev => ({ ...prev, isOpen: false }))}
+                className="text-stone-400 hover:text-stone-700 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              {lang === 'ru'
+                ? 'Форматы AAC (m4a) и WebM содержат самостоятельные заголовки контейнеров, поэтому объединять фрагменты простой конкатенацией нельзя — файл будет повреждён. Выберите формат сохранения:'
+                : 'Фарматы AAC (m4a) і WebM маюць самастойныя загалоўкі кантэйнераў, таму злучаць фрагменты простай сцэпкай нельга — файл будзе пашкоджаны. Абярыце варыянт захавання:'}
+            </p>
+
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={handleDownloadZipArchive}
+                className="w-full px-4 py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-between gap-2 shadow-sm transition-all cursor-pointer"
+              >
+                <span className="flex items-center gap-2">
+                  <FileDown className="w-4 h-4" />
+                  {lang === 'ru' ? 'Скачать всё архивом (.zip)' : 'Спампаваць усё архівам (.zip)'}
+                </span>
+                <span className="text-[10px] bg-emerald-800/80 px-2 py-0.5 rounded text-emerald-100">
+                  {segmentModalData.segments.length} {lang === 'ru' ? 'файлов' : 'файлаў'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadSeparateParts}
+                className="w-full px-4 py-3 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-between gap-2 border border-stone-300 transition-all cursor-pointer"
+              >
+                <span className="flex items-center gap-2">
+                  <FileDown className="w-4 h-4 text-stone-600" />
+                  {lang === 'ru' ? 'Скачать части раздельно' : 'Спампаваць часткі паасобку'}
+                </span>
+                <span className="text-[10px] text-stone-500 font-mono">
+                  имя_часть1, часть2...
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSegmentModalData(prev => ({ ...prev, isOpen: false }));
+                  handleExportWav(false);
+                }}
+                className="w-full px-4 py-3 bg-sky-700 hover:bg-sky-800 text-white rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-between gap-2 shadow-sm transition-all cursor-pointer"
+              >
+                <span className="flex items-center gap-2">
+                  <FileDown className="w-4 h-4" />
+                  {lang === 'ru' ? 'Склеить в один файл WAV (16 кГц)' : 'Аб\'яднаць у адзін файл WAV (16 кГц)'}
+                </span>
+                <span className="text-[10px] bg-sky-800/80 px-2 py-0.5 rounded text-sky-100">
+                  PCM Моно
+                </span>
+              </button>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSegmentModalData(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 text-stone-500 hover:text-stone-800 text-xs font-bold uppercase tracking-wider cursor-pointer"
+              >
+                {lang === 'ru' ? 'Отмена' : 'Адмена'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal warning when WAV conversion exceeds 60 minutes */}
+      {wavConfirmData.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-amber-300 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-amber-100 text-amber-800 rounded-xl shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-stone-900 font-serif">
+                  {lang === 'ru' ? 'Большая длительность записи' : 'Вялікая працягласць запісу'}
+                </h3>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  {lang === 'ru'
+                    ? `Длительность: ~${Math.round(wavConfirmData.durationSec / 60)} мин (превышает 60 минут)`
+                    : `Працягласць: ~${Math.round(wavConfirmData.durationSec / 60)} хв (перавышае 60 хвілін)`}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-stone-600 leading-relaxed">
+              {lang === 'ru'
+                ? 'Декодирование и конвертация столь длинной аудиозаписи в память устройства может занять много времени или привести к нехватке памяти браузера. Рекомендуется экспортировать оригинальный формат (.m4a/.webm).'
+                : 'Дэкадаванне такога доўгага аўдыязапісу ў памяць прылады можа запатрабаваць шмат рэсурсаў. Рэкамендуецца экспартаваць арыгінальны фармат (.m4a/.webm).'}
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setWavConfirmData(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2.5 text-stone-600 hover:bg-stone-100 rounded-lg text-xs font-bold uppercase tracking-wider cursor-pointer"
+              >
+                {lang === 'ru' ? 'Отмена' : 'Адмена'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setWavConfirmData(prev => ({ ...prev, isOpen: false }));
+                  downloadAudioRecording();
+                }}
+                className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider shadow-sm cursor-pointer"
+              >
+                {lang === 'ru' ? 'Экспорт оригинала' : 'Экспарт арыгінала'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setWavConfirmData(prev => ({ ...prev, isOpen: false }));
+                  handleExportWav(true);
+                }}
+                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold uppercase tracking-wider shadow-sm cursor-pointer"
+              >
+                {lang === 'ru' ? 'Всё равно в WAV' : 'Усё роўна ў WAV'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating progress banner for WAV conversion */}
+      {wavProgress.isConverting && (
+        <div className="fixed bottom-6 right-6 z-50 bg-stone-900/90 text-white px-5 py-3.5 rounded-xl shadow-2xl border border-stone-700 flex items-center gap-3 backdrop-blur-md">
+          <RefreshCw className="w-5 h-5 text-sky-400 animate-spin shrink-0" />
+          <div className="space-y-0.5">
+            <div className="text-xs font-bold font-sans">
+              {lang === 'ru' ? 'Конвертация в WAV (16 кГц)' : 'Канвертацыя ў WAV (16 кГц)'}: {wavProgress.percent}%
+            </div>
+            <div className="text-[11px] text-stone-300">
+              {wavProgress.message}
+            </div>
+          </div>
         </div>
       )}
 
