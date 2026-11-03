@@ -224,7 +224,7 @@ export function buildDiagnosticExportContent(lines: string[]): string {
 
   const header = [
     '================================================================',
-    'ETNOFIELD RECORDING DIAGNOSTIC LOG',
+    'HAVORKA RECORDING DIAGNOSTIC LOG',
     '================================================================',
     `Export Date:     ${dateStr}`,
     `App Version:     0.1.0`,

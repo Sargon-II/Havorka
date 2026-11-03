@@ -1,4 +1,4 @@
-package com.etnofield.app;
+package com.havorka.app;
 
 import android.Manifest;
 import android.content.Context;

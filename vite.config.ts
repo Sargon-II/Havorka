@@ -39,8 +39,8 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
         manifest: {
-          name: 'Полевой помощник исследователя',
-          short_name: 'Помощник исследователя',
+          name: 'Havorka — Полевой помощник исследователя',
+          short_name: 'Havorka',
           description: 'Инструментарий исследователя и этнолога для Беларуси: визуальный конструктор опросников, анализ билингвизма, спонтанной речи, кодирование текстов.',
           theme_color: '#0f172a',
           background_color: '#0f172a',

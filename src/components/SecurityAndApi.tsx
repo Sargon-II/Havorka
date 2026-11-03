@@ -229,7 +229,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
       const now = new Date();
       const datePart = now.toISOString().slice(0, 10).replace(/-/g, '');
       const timePart = now.toTimeString().slice(0, 8).replace(/:/g, '');
-      const filename = `etnofield-diag-${datePart}-${timePart}.txt`;
+      const filename = `havorka-diag-${datePart}-${timePart}.txt`;
       await saveFile(blob, filename, 'text/plain');
       setDiagActionMessage(
         lang === 'ru'

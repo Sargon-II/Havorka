@@ -5,7 +5,7 @@
 
 import { getKV, setKV } from './db';
 
-const MIGRATION_FLAG = 'etnofield_storage_migrated_v1';
+const MIGRATION_FLAG = 'havorka_storage_migrated_v1';
 
 export const KEYS_TO_MIGRATE = [
   'field_diary',

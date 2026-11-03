@@ -1267,8 +1267,8 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
               </p>
               <p>
                 {lang === 'ru'
-                  ? '1. Откройте «Настройки устройства → Приложения → Etnofield → Разрешения → Микрофон».'
-                  : '1. Open Device Settings → Apps → Etnofield → Permissions → Microphone.'}
+                  ? '1. Откройте «Настройки устройства → Приложения → Havorka → Разрешения → Микрофон».'
+                  : '1. Open Device Settings → Apps → Havorka → Permissions → Microphone.'}
               </p>
               <p>
                 {lang === 'ru'

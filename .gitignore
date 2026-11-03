@@ -16,3 +16,6 @@ android/local.properties
 
 # Tauri
 src-tauri/target/
+
+# IDE
+.vscode/

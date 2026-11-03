@@ -1,4 +1,4 @@
-package com.etnofield.app;
+package com.havorka.app;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

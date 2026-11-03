@@ -1,4 +1,4 @@
-package com.etnofield.app;
+package com.havorka.app;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -18,7 +18,7 @@ import androidx.core.app.NotificationCompat;
 public class RecordingService extends Service {
     public static final String ACTION_START = "ACTION_START";
     public static final String ACTION_STOP = "ACTION_STOP";
-    public static final String CHANNEL_ID = "etnofield_recording_channel";
+    public static final String CHANNEL_ID = "havorka_recording_channel";
     public static final int NOTIFICATION_ID = 40401;
 
     private static AudioFocusListener sAudioFocusListener;
@@ -110,7 +110,7 @@ public class RecordingService extends Service {
         );
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Etnofield")
+            .setContentTitle("Havorka")
             .setContentText("Идёт запись интервью")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)

@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.etnofield.app',
-  appName: 'Etnofield',
+  appId: 'com.havorka.app',
+  appName: 'Havorka',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

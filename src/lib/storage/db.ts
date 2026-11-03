@@ -53,7 +53,7 @@ export interface AudioChunkRecord {
   timestamp: number;
 }
 
-export interface EtnofieldDB extends DBSchema {
+export interface HavorkaDB extends DBSchema {
   kv: {
     key: string;
     value: any;
@@ -76,14 +76,14 @@ export interface EtnofieldDB extends DBSchema {
   };
 }
 
-const DB_NAME = 'etnofield_db';
+const DB_NAME = 'havorka_db';
 const DB_VERSION = 1;
 
-let dbPromise: Promise<IDBPDatabase<EtnofieldDB>> | null = null;
+let dbPromise: Promise<IDBPDatabase<HavorkaDB>> | null = null;
 
-export const getDB = (): Promise<IDBPDatabase<EtnofieldDB>> => {
+export const getDB = (): Promise<IDBPDatabase<HavorkaDB>> => {
   if (!dbPromise) {
-    dbPromise = openDB<EtnofieldDB>(DB_NAME, DB_VERSION, {
+    dbPromise = openDB<HavorkaDB>(DB_NAME, DB_VERSION, {
       upgrade(db) {
         // 1. Key-Value store
         if (!db.objectStoreNames.contains('kv')) {
