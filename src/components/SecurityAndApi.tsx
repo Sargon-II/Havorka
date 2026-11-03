@@ -20,6 +20,11 @@ import {
   buildDiagnosticExportContent,
 } from '../lib/diagnostics/log';
 import { saveFile } from '../platform/files';
+import {
+  getAndroidSaveTarget,
+  setAndroidSaveTarget,
+  AndroidSaveTarget,
+} from '../platform/fileSaveDialog';
 
 interface SecurityAndApiProps {
   lang: Language;
@@ -30,6 +35,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
   const [showKey, setShowKey] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [decodedError, setDecodedError] = useState<DecodedError | null>(null);
+  const [androidSavePref, setAndroidSavePref] = useState<AndroidSaveTarget>(getAndroidSaveTarget());
 
   // API Key Status Machine
   const [keyStatus, setKeyStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid' | 'offline'>('idle');
@@ -1203,6 +1209,91 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
                   <span>{isRequestingPersist ? '...' : (lang === 'ru' ? 'Запросить защиту (persist)' : lang === 'by' ? 'Запытаць абарону (persist)' : '申请持久化 (persist)')}</span>
                 </button>
               )}
+            </div>
+          </div>
+
+          {/* Section: Android File Export Settings */}
+          <div className="bg-white border border-sahara-surface-dim/40 rounded-xl p-6 md:p-8 space-y-5 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-sahara-surface-dim/30 pb-4 gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-md bg-green-100/20 text-sahara-primary">
+                  <Download className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-serif font-black text-sahara-primary">
+                    {lang === 'ru' ? 'Экспорт файлов на Android' : lang === 'by' ? 'Экспарт файлаў на Android' : 'Android 文件导出设置'}
+                  </h3>
+                  <p className="text-xs text-sahara-secondary">
+                    {lang === 'ru'
+                      ? 'Действие по умолчанию при экспорте аудиозаписей и отчётов (Storage Access Framework или меню «Поделиться»)'
+                      : lang === 'by'
+                      ? 'Дзеянне па змаўчанні пры экспарце аўдыязапісаў і справаздач (Storage Access Framework альбо меню «Падзяліцца»)'
+                      : '配置导出录音和文档时的默认动作（SAF 存储框架或系统分享面板）'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setAndroidSaveTarget('ask');
+                  setAndroidSavePref('ask');
+                }}
+                className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between gap-2 ${
+                  androidSavePref === 'ask'
+                    ? 'bg-sahara-primary/10 border-sahara-primary text-sahara-primary font-bold shadow-xs'
+                    : 'bg-sahara-background/60 border-sahara-surface-dim/60 text-sahara-secondary hover:text-sahara-onbackground hover:border-sahara-primary/30'
+                }`}
+              >
+                <div className="text-xs font-bold font-sans">
+                  {lang === 'ru' ? '❓ Спрашивать каждый раз' : lang === 'by' ? '❓ Запытваць кожны раз' : '❓ 每次询问'}
+                </div>
+                <div className="text-[11px] font-normal leading-relaxed opacity-85">
+                  {lang === 'ru' ? 'Показывать выбор между сохранением на устройство и «Поделиться» при каждом экспорте (по умолчанию)' : lang === 'by' ? 'Паказваць выбар пры кожным экспарце (па змаўчанні)' : '每次导出时弹窗询问存储至设备还是分享（默认）'}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAndroidSaveTarget('device');
+                  setAndroidSavePref('device');
+                }}
+                className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between gap-2 ${
+                  androidSavePref === 'device'
+                    ? 'bg-sahara-primary/10 border-sahara-primary text-sahara-primary font-bold shadow-xs'
+                    : 'bg-sahara-background/60 border-sahara-surface-dim/60 text-sahara-secondary hover:text-sahara-onbackground hover:border-sahara-primary/30'
+                }`}
+              >
+                <div className="text-xs font-bold font-sans">
+                  {lang === 'ru' ? '💾 На устройство (SAF)' : lang === 'by' ? '💾 На прыладу (SAF)' : '💾 存至设备 (SAF)'}
+                </div>
+                <div className="text-[11px] font-normal leading-relaxed opacity-85">
+                  {lang === 'ru' ? 'Сразу открывать системный проводник Android для выбора папки' : lang === 'by' ? 'Адразу адкрываць сістэмны праваднік Android для выбару папкі' : '直接呼出 Android 系统文件管理器保存至选择的文件夹'}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAndroidSaveTarget('share');
+                  setAndroidSavePref('share');
+                }}
+                className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between gap-2 ${
+                  androidSavePref === 'share'
+                    ? 'bg-sahara-primary/10 border-sahara-primary text-sahara-primary font-bold shadow-xs'
+                    : 'bg-sahara-background/60 border-sahara-surface-dim/60 text-sahara-secondary hover:text-sahara-onbackground hover:border-sahara-primary/30'
+                }`}
+              >
+                <div className="text-xs font-bold font-sans">
+                  {lang === 'ru' ? '↗️ Меню «Поделиться»' : lang === 'by' ? '↗️ Меню «Падзяліцца»' : '↗️ 系统分享'}
+                </div>
+                <div className="text-[11px] font-normal leading-relaxed opacity-85">
+                  {lang === 'ru' ? 'Сразу открывать меню отправки файла в мессенджеры, Диск или почту' : lang === 'by' ? 'Адразу адкрываць меню адпраўкі файла ў месенджары альбо пошту' : '直接打开系统分享菜单，快速发送至应用'}
+                </div>
+              </button>
             </div>
           </div>
 

@@ -3,6 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  promptAndroidSaveTarget,
+  createSaveProgressTracker,
+  showSaveNotification,
+} from './fileSaveDialog';
+
 /**
  * Platform detection flags
  */
@@ -34,23 +40,39 @@ export function getAudioExtension(mimeType?: string): string {
 }
 
 /**
- * Convert Blob to Base64 string (without data URL scheme prefix)
+ * 2 MB chunk size for streaming large files without large memory allocations
  */
-async function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataUrl = reader.result as string;
-      const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-      resolve(base64);
-    };
-    reader.onerror = () => reject(reader.error || new Error('Failed to read blob as Base64'));
-    reader.readAsDataURL(blob);
-  });
+const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB
+
+/**
+ * Files larger than 20 MB display a real-time progress indicator
+ */
+const PROGRESS_THRESHOLD = 20 * 1024 * 1024; // 20 MB
+
+/**
+ * Helper to slice Blob into an ArrayBuffer and Uint8Array
+ */
+async function chunkToUint8Array(chunk: Blob): Promise<Uint8Array> {
+  const buffer = await chunk.arrayBuffer();
+  return new Uint8Array(buffer);
 }
 
 /**
- * Standard Web download using an <a> element with download attribute
+ * Helper to encode Uint8Array chunk to Base64 in sub-slices to prevent call-stack overflow
+ */
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const len = bytes.byteLength;
+  const subChunkSize = 32768;
+  for (let i = 0; i < len; i += subChunkSize) {
+    const sub = bytes.subarray(i, Math.min(i + subChunkSize, len));
+    binary += String.fromCharCode.apply(null, sub as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Standard Web download using an <a> element with download attribute (Web: unchanged)
  */
 function saveViaWeb(blob: Blob, filename: string): void {
   const safeFilename = filename.replace(/^.*[\\/]/, '') || filename;
@@ -70,57 +92,170 @@ function saveViaWeb(blob: Blob, filename: string): void {
 }
 
 /**
- * Capacitor native saving: writes file to cache directory and triggers native Share sheet
+ * Capacitor native saving for Android:
+ * 1. Prompts user: «Сохранить на устройство» (SAF) vs «Поделиться» (Share sheet), with option to remember preference.
+ * 2. Streams Blob in 2 MB chunks into app cache temporary file (never loading entire file as Base64 in memory).
+ * 3. Copies via SAF or hands off to Share sheet.
+ * 4. Shows progress for files > 20 MB and clear completion/error feedback.
  */
 async function saveViaCapacitor(blob: Blob, filename: string, mime: string): Promise<void> {
   const safeFilename = filename.replace(/^.*[\\/]/, '') || filename;
-  const base64 = await blobToBase64(blob);
+  const totalBytes = blob.size;
+  const isLarge = totalBytes >= PROGRESS_THRESHOLD;
 
-  // Literal dynamic import of @capacitor/filesystem (code-split into separate chunk)
-  const { Filesystem, Directory } = await import('@capacitor/filesystem');
-
-  const writeResult = await Filesystem.writeFile({
-    path: safeFilename,
-    data: base64,
-    directory: Directory.Cache,
-    recursive: true,
+  // 1. Prompt user choice if not remembered
+  const choice = await promptAndroidSaveTarget({
+    filename: safeFilename,
+    sizeBytes: totalBytes,
   });
 
-  // Literal dynamic import of @capacitor/share (code-split into separate chunk)
-  const { Share } = await import('@capacitor/share');
+  if (choice === 'cancel') {
+    showSaveNotification({
+      type: 'info',
+      title: 'Экспорт отменён',
+      message: `Сохранение файла «${safeFilename}» отменено пользователем.`,
+    });
+    return;
+  }
 
-  await Share.share({
-    title: safeFilename,
-    text: safeFilename,
-    url: writeResult.uri,
-    dialogTitle: 'Сохранить или экспортировать файл',
-  });
+  // 2. Start progress tracker for large files
+  const tracker = isLarge ? createSaveProgressTracker(safeFilename, totalBytes) : null;
+
+  let tempFilePath: string | null = null;
+  try {
+    const { FileSave } = await import('./fileSaveBridge');
+
+    // 3. Initialize temporary file in app cache
+    const initRes = await FileSave.initTempFile({ filename: safeFilename });
+    tempFilePath = initRes.tempFilePath;
+
+    // 4. Stream chunks (2 MB each) to avoid high memory footprint
+    for (let offset = 0; offset < totalBytes; offset += CHUNK_SIZE) {
+      const slice = blob.slice(offset, Math.min(offset + CHUNK_SIZE, totalBytes));
+      const bytes = await chunkToUint8Array(slice);
+      const chunkBase64 = uint8ToBase64(bytes);
+
+      await FileSave.appendTempChunk({
+        tempFilePath,
+        chunkBase64,
+      });
+
+      const currentLoaded = Math.min(offset + slice.size, totalBytes);
+      tracker?.update(currentLoaded);
+    }
+
+    // 5. Route to selected action
+    if (choice === 'device') {
+      const safRes = await FileSave.saveWithSAF({
+        tempFilePath,
+        suggestedName: safeFilename,
+        mimeType: mime || '*/*',
+      });
+
+      if (safRes.cancelled) {
+        tracker?.close();
+        await FileSave.cleanTempFile({ tempFilePath }).catch(() => {});
+        showSaveNotification({
+          type: 'info',
+          title: 'Экспорт отменён',
+          message: 'Выбор папки отменён пользователем.',
+        });
+        return;
+      }
+
+      const savedName = safRes.displayName || safeFilename;
+      tracker?.finish(`Файл сохранён: ${savedName}`);
+      showSaveNotification({
+        type: 'success',
+        title: 'Файл успешно сохранён',
+        message: `Файл «${savedName}» сохранён на устройство через системный проводник.`,
+      });
+    } else {
+      // Choice: 'share'
+      await FileSave.shareTempFile({
+        tempFilePath,
+        filename: safeFilename,
+        mimeType: mime || '*/*',
+        dialogTitle: 'Поделиться файлом',
+      });
+
+      tracker?.finish('Файл передан в меню «Поделиться»');
+      showSaveNotification({
+        type: 'success',
+        title: 'Экспорт выполнен',
+        message: `Файл «${safeFilename}» передан в системное меню «Поделиться».`,
+      });
+    }
+  } catch (err: any) {
+    if (tempFilePath) {
+      try {
+        const { FileSave } = await import('./fileSaveBridge');
+        await FileSave.cleanTempFile({ tempFilePath });
+      } catch (_) {}
+    }
+    const errMsg = err?.message || String(err);
+    tracker?.error(errMsg);
+    showSaveNotification({
+      type: 'error',
+      title: 'Ошибка сохранения файла',
+      message: `Не удалось сохранить «${safeFilename}»: ${errMsg}`,
+    });
+    throw err;
+  }
 }
 
 /**
- * Tauri native saving: opens native Save File Dialog and writes bytes using @tauri-apps/plugin-fs
+ * Tauri native saving: opens save dialog and streams large files in chunks
  */
 async function saveViaTauri(blob: Blob, filename: string, mime: string): Promise<void> {
   const safeFilename = filename.replace(/^.*[\\/]/, '') || filename;
+  const totalBytes = blob.size;
+  const isLarge = totalBytes >= PROGRESS_THRESHOLD;
 
-  // Literal dynamic import of @tauri-apps/plugin-dialog (code-split into separate chunk)
   const { save } = await import('@tauri-apps/plugin-dialog');
-
   const selectedPath = await save({
     defaultPath: safeFilename,
   });
 
-  // User cancelled the save dialog
   if (!selectedPath) {
     return;
   }
 
-  // Literal dynamic import of @tauri-apps/plugin-fs (code-split into separate chunk)
-  const { writeFile } = await import('@tauri-apps/plugin-fs');
+  const tracker = isLarge ? createSaveProgressTracker(safeFilename, totalBytes) : null;
 
-  const buffer = await blob.arrayBuffer();
-  const uint8 = new Uint8Array(buffer);
-  await writeFile(selectedPath, uint8);
+  try {
+    const { create } = await import('@tauri-apps/plugin-fs');
+    const fileHandle = await create(selectedPath);
+
+    try {
+      for (let offset = 0; offset < totalBytes; offset += CHUNK_SIZE) {
+        const slice = blob.slice(offset, Math.min(offset + CHUNK_SIZE, totalBytes));
+        const bytes = await chunkToUint8Array(slice);
+        await fileHandle.write(bytes);
+
+        const currentLoaded = Math.min(offset + slice.size, totalBytes);
+        tracker?.update(currentLoaded);
+      }
+    } finally {
+      await fileHandle.close();
+    }
+
+    tracker?.finish(`Файл сохранён: ${selectedPath}`);
+    showSaveNotification({
+      type: 'success',
+      title: 'Файл успешно сохранён',
+      message: `Файл сохранён по пути: ${selectedPath}`,
+    });
+  } catch (err: any) {
+    const errMsg = err?.message || String(err);
+    tracker?.error(errMsg);
+    showSaveNotification({
+      type: 'error',
+      title: 'Ошибка сохранения файла',
+      message: `Не удалось сохранить «${safeFilename}»: ${errMsg}`,
+    });
+    throw err;
+  }
 }
 
 /**
@@ -146,10 +281,6 @@ export async function saveFile(blob: Blob, filename: string, mime: string): Prom
     saveViaWeb(blob, filename);
   } catch (error: any) {
     console.error(`[saveFile] Error saving file "${filename}":`, error);
-    const userMessage = error?.message || String(error);
-    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-      window.alert(`Не удалось сохранить файл "${filename}".\n\nПричина: ${userMessage}`);
-    }
     throw error;
   }
 }
