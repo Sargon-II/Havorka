@@ -22,7 +22,7 @@ import { usePersistentState } from '../lib/storage/usePersistentState';
 import { getKV, setKV } from '../lib/storage/db';
 import { useRecorder } from '../lib/recording/useRecorder';
 import { exportSessionBlob } from '../lib/recording/recorder';
-import { saveFile } from '../platform/files';
+import { saveFile, getAudioExtension } from '../platform/files';
 
 interface QuestionnaireBuilderProps {
   questionnaire: Questionnaire;
@@ -665,16 +665,17 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     const safeLocation = cleanForFilename(sessionLocation) || 'Локация';
     const safeResearcher = cleanForFilename(sessionResearcher) || 'Исследователь';
     const safeDate = cleanForFilename(sessionDate) || '2026';
+    const ext = getAudioExtension(finalBlob.type);
 
-    const filename = `Полевая_аудиозапись_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.mp3`;
+    const filename = `Полевая_аудиозапись_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.${ext}`;
 
     try {
-      await saveFile(finalBlob, filename, finalBlob.type || 'audio/mpeg');
+      await saveFile(finalBlob, filename, finalBlob.type || `audio/${ext}`);
       showToast(lang === 'ru' 
-        ? 'Аудиозапись .MP3 успешно сохранена!' 
+        ? `Аудиозапись .${ext.toUpperCase()} успешно сохранена!` 
         : lang === 'by' 
-        ? 'Аўдыязапіс .MP3 паспяхова захаваны!' 
-        : 'MP3 recording saved successfully!');
+        ? `Аўдыязапіс .${ext.toUpperCase()} паспяхова захаваны!` 
+        : `Audio recording (.${ext.toUpperCase()}) saved successfully!`);
     } catch (err: any) {
       console.error('Failed to download audio file', err);
       showToast(lang === 'ru' ? `Ошибка сохранения аудио: ${err.message || err}` : `Памылка захавання аўдыя: ${err.message || err}`);
@@ -851,6 +852,18 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     const skipped = flatQuestions.filter(q => questionStatuses[q.id] === 'skipped').length;
     const later = flatQuestions.filter(q => questionStatuses[q.id] === 'later').length;
 
+    const cleanForFilename = (text: string) => {
+      return text
+        .replace(/[^a-zA-Z0-9а-яА-ЯёЁіІўЎ\s_-]/g, '')
+        .trim()
+        .replace(/\s+/g, '_');
+    };
+
+    const safeInformant = cleanForFilename(sessionInformant) || 'Информант';
+    const safeLocation = cleanForFilename(sessionLocation) || 'Локация';
+    const safeResearcher = cleanForFilename(sessionResearcher) || 'Исследователь';
+    const safeDate = cleanForFilename(sessionDate) || '2026';
+
     try {
       // Build document children structure
       const children: any[] = [
@@ -904,6 +917,14 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
             new TextRun({ text: formatTime(secondsElapsed) })
           ]
         }),
+        ...(audioBlob ? [
+          new Paragraph({
+            children: [
+              new TextRun({ text: "Файл сопутствующей аудиозаписи: ", bold: true }),
+              new TextRun({ text: `Полевая_аудиозапись_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.${getAudioExtension(audioBlob.type)}` })
+            ]
+          })
+        ] : []),
         new Paragraph({
           children: [
             new TextRun({ text: "Статистика сессии: ", bold: true }),
@@ -1051,18 +1072,6 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
         }]
       });
 
-      const cleanForFilename = (text: string) => {
-        return text
-          .replace(/[^a-zA-Z0-9а-яА-ЯёЁіІўЎ\s_-]/g, '')
-          .trim()
-          .replace(/\s+/g, '_');
-      };
-
-      const safeInformant = cleanForFilename(sessionInformant) || 'Информант';
-      const safeLocation = cleanForFilename(sessionLocation) || 'Локация';
-      const safeResearcher = cleanForFilename(sessionResearcher) || 'Исследователь';
-      const safeDate = cleanForFilename(sessionDate) || '2026';
-
       const filename = `Полевые_записи_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.docx`;
 
       Packer.toBlob(doc).then(async (blob) => {
@@ -1103,8 +1112,14 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     md += `**Исследователь (ФИО):** ${sessionResearcher || 'Неизвестный исследователь'}\n`;
     md += `**Дата проведения:** ${sessionDate || 'Без даты'}\n`;
     md += `**Продолжительность записи:** ${formatTime(secondsElapsed)}\n`;
-    md += `**Статистика сессии:** Задано ${asked}, Пропущено ${skipped}, Требуют уточнения ${later} (Всего активных вопросов: ${flatQuestions.length})\n\n`;
-    md += `### РАЗМЕЧАННЫЕ ОТВЕТЫ И ПОЛЕВЫЕ ЗАМЕТКИ С ТАЙМКОДАМИ:\n\n`;
+    md += `**Статистика сессии:** Задано ${asked}, Пропущено ${skipped}, Требуют уточнения ${later} (Всего активных вопросов: ${flatQuestions.length})\n`;
+    if (audioBlob) {
+      const ext = getAudioExtension(audioBlob.type);
+      const cleanInf = (sessionInformant || 'Информант').replace(/[^a-zA-Z0-9а-яА-ЯёЁ_-]/g, '_');
+      const cleanDate = (sessionDate || 'Дата').replace(/[^a-zA-Z0-9а-яА-ЯёЁ_-]/g, '_');
+      md += `**Связанный аудиофайл:** Полевая_аудиозапись_${cleanInf}_${cleanDate}.${ext} (${audioBlob.type || 'аудио'})\n`;
+    }
+    md += `\n### РАЗМЕЧАННЫЕ ОТВЕТЫ И ПОЛЕВЫЕ ЗАМЕТКИ С ТАЙМКОДАМИ:\n\n`;
 
     flatQuestions.forEach((q, idx) => {
       const statusValue = questionStatuses[q.id] || 'unasked';
@@ -1197,6 +1212,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   };
 
   const activeQuestion = flatQuestions[activeQuestionIndex];
+  const audioExtLabel = audioBlob ? getAudioExtension(audioBlob.type).toUpperCase() : 'АУДИО';
 
   return (
     <div ref={containerRef} className="space-y-10 max-w-7xl mx-auto px-1 md:px-0">
@@ -1276,7 +1292,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                         onClick={async () => {
                           const b = await recoverSession(s);
                           if (b) {
-                            showToast(lang === 'ru' ? 'Аудиозапись успешно восстановлена! Нажмите «Выгрузить MP3» для сохранения.' : 'Аўдыязапіс паспяхова адноўлены!');
+                            showToast(lang === 'ru' ? 'Аудиозапись успешно восстановлена! Нажмите кнопку выгрузки аудио для сохранения.' : 'Аўдыязапіс паспяхова адноўлены!');
                           }
                         }}
                         className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider cursor-pointer"
@@ -1446,10 +1462,10 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                   type="button"
                   onClick={downloadAudioRecording}
                   className="flex-1 sm:flex-initial px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider cursor-pointer flex items-center justify-center gap-2 transition-all"
-                  title="Скачать записанный аудиофайл"
+                  title={`Скачать записанный аудиофайл (.${audioExtLabel.toLowerCase()})`}
                 >
                   <FileDown className="w-4 h-4" />
-                  {lang === 'ru' ? 'Выгрузить MP3' : lang === 'by' ? 'Выгрузіць MP3' : 'Export MP3'}
+                  {lang === 'ru' ? `Выгрузить ${audioExtLabel}` : lang === 'by' ? `Выгрузіць ${audioExtLabel}` : `Export ${audioExtLabel}`}
                 </button>
 
                 <button
@@ -1912,7 +1928,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                       className="flex-1 px-5 py-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 hover:-translate-y-0.5 cursor-pointer shadow-md flex items-center justify-center gap-2"
                     >
                       <FileDown className="w-4 h-4 shrink-0" />
-                      {lang === 'ru' ? 'Выгрузить аудиозапись .MP3' : lang === 'by' ? 'Выгрузіць аўдыязапіс .MP3' : 'Download Audio .MP3'}
+                      {lang === 'ru' ? `Выгрузить аудиозапись (.${audioExtLabel.toLowerCase()})` : lang === 'by' ? `Выгрузіць аўдыязапіс (.${audioExtLabel.toLowerCase()})` : `Download Audio (.${audioExtLabel.toLowerCase()})`}
                     </button>
                     <button
                       onClick={saveSessionToFieldDiary}

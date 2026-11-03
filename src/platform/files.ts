@@ -20,6 +20,20 @@ export function isTauriPlatform(): boolean {
 }
 
 /**
+ * Detect file extension from MIME type for audio recordings
+ */
+export function getAudioExtension(mimeType?: string): string {
+  if (!mimeType) return 'mp3';
+  const lower = mimeType.toLowerCase();
+  if (lower.includes('webm')) return 'webm';
+  if (lower.includes('ogg')) return 'ogg';
+  if (lower.includes('mp4') || lower.includes('m4a') || lower.includes('aac')) return 'mp4';
+  if (lower.includes('wav')) return 'wav';
+  if (lower.includes('mpeg') || lower.includes('mp3')) return 'mp3';
+  return 'mp3';
+}
+
+/**
  * Convert Blob to Base64 string (without data URL scheme prefix)
  */
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -62,9 +76,8 @@ async function saveViaCapacitor(blob: Blob, filename: string, mime: string): Pro
   const safeFilename = filename.replace(/^.*[\\/]/, '') || filename;
   const base64 = await blobToBase64(blob);
 
-  // Dynamic import of @capacitor/filesystem
-  const fsModuleName = '@capacitor/filesystem';
-  const { Filesystem, Directory } = await import(/* @vite-ignore */ fsModuleName);
+  // Literal dynamic import of @capacitor/filesystem (code-split into separate chunk)
+  const { Filesystem, Directory } = await import('@capacitor/filesystem');
 
   const writeResult = await Filesystem.writeFile({
     path: safeFilename,
@@ -73,9 +86,8 @@ async function saveViaCapacitor(blob: Blob, filename: string, mime: string): Pro
     recursive: true,
   });
 
-  // Dynamic import of @capacitor/share
-  const shareModuleName = '@capacitor/share';
-  const { Share } = await import(/* @vite-ignore */ shareModuleName);
+  // Literal dynamic import of @capacitor/share (code-split into separate chunk)
+  const { Share } = await import('@capacitor/share');
 
   await Share.share({
     title: safeFilename,
@@ -91,9 +103,8 @@ async function saveViaCapacitor(blob: Blob, filename: string, mime: string): Pro
 async function saveViaTauri(blob: Blob, filename: string, mime: string): Promise<void> {
   const safeFilename = filename.replace(/^.*[\\/]/, '') || filename;
 
-  // Dynamic import of @tauri-apps/plugin-dialog
-  const dialogModuleName = '@tauri-apps/plugin-dialog';
-  const { save } = await import(/* @vite-ignore */ dialogModuleName);
+  // Literal dynamic import of @tauri-apps/plugin-dialog (code-split into separate chunk)
+  const { save } = await import('@tauri-apps/plugin-dialog');
 
   const selectedPath = await save({
     defaultPath: safeFilename,
@@ -104,9 +115,8 @@ async function saveViaTauri(blob: Blob, filename: string, mime: string): Promise
     return;
   }
 
-  // Dynamic import of @tauri-apps/plugin-fs
-  const fsModuleName = '@tauri-apps/plugin-fs';
-  const { writeFile } = await import(/* @vite-ignore */ fsModuleName);
+  // Literal dynamic import of @tauri-apps/plugin-fs (code-split into separate chunk)
+  const { writeFile } = await import('@tauri-apps/plugin-fs');
 
   const buffer = await blob.arrayBuffer();
   const uint8 = new Uint8Array(buffer);
@@ -118,7 +128,7 @@ async function saveViaTauri(blob: Blob, filename: string, mime: string): Promise
  *
  * @param blob Binary data of the file to save
  * @param filename Default filename or path
- * @param mime MIME type (e.g., 'audio/mpeg', 'application/zip', 'text/markdown')
+ * @param mime MIME type (e.g., 'audio/mpeg', 'audio/webm', 'application/zip', 'text/markdown')
  */
 export async function saveFile(blob: Blob, filename: string, mime: string): Promise<void> {
   try {
