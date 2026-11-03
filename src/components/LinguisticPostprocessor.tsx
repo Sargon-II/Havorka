@@ -1895,7 +1895,7 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
                             </span>
 
                             {/* Token canvas block */}
-                            <div className="bg-white border border-sahara-surface-dim/40 rounded-xl p-4 sm:p-6 block leading-loose min-h-[50px] select-none">
+                            <div className="bg-white border border-sahara-surface-dim/40 rounded-xl p-4 sm:p-6 block leading-loose min-h-[50px] select-none linguistic-text">
                               {words.map((word, wordIdx) => {
                                 // Check if this index belongs to any selected range
                                 const isSelectionTarget = selectedIndices.includes(wordIdx);

@@ -182,7 +182,7 @@ export default function Navigation({ activeTab, setActiveTab, researcherName, se
               }`}
             >
               <span className="text-[10px] uppercase font-mono tracking-widest">{item.idxStr}</span>
-              <span className="text-[11px] sm:text-[12px] font-sans font-bold tracking-tight mt-0.5 text-center leading-tight break-words min-w-0 line-clamp-2">{item.label}</span>
+              <span className="text-[11px] sm:text-[12px] font-sans font-bold tracking-tight mt-0.5 text-center leading-tight break-words min-w-0">{item.label}</span>
               {isActive && <div className="w-6 h-[2px] bg-sahara-primary mt-1" />}
             </button>
           );
