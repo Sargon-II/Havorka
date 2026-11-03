@@ -11,8 +11,10 @@ coverage/
 # Android
 android/.gradle/
 android/build/
+android/build_out/
 android/app/build/
 android/local.properties
+android/*.apk
 
 # Tauri
 src-tauri/target/

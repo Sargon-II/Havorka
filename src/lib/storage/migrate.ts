@@ -48,6 +48,14 @@ export async function migrateLocalStorageToIDB(): Promise<boolean> {
       // NEVER migrate API key
       if (key === 'user_gemini_api_key') continue;
 
+      // Special handling for photos: store Blobs in photos store, metadata in kv
+      if (key === 'field_cultural_photos') {
+        const { migrateLegacyPhotosFromLocalStorage } = await import('./photoStore');
+        await migrateLegacyPhotosFromLocalStorage();
+        keysMigrated.push(key);
+        continue;
+      }
+
       const raw = localStorage.getItem(key);
       if (raw !== null) {
         let parsed: any = raw;

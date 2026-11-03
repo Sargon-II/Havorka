@@ -53,6 +53,13 @@ export interface AudioChunkRecord {
   timestamp: number;
 }
 
+export interface PhotoRecord {
+  id: string;
+  blob: Blob;
+  mimeType: string;
+  createdAt: number;
+}
+
 export interface HavorkaDB extends DBSchema {
   kv: {
     key: string;
@@ -74,10 +81,17 @@ export interface HavorkaDB extends DBSchema {
       'by_session_segment': [string, number];
     };
   };
+  photos: {
+    key: string;
+    value: PhotoRecord;
+    indexes: {
+      'by_created': number;
+    };
+  };
 }
 
 const DB_NAME = 'havorka_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase<HavorkaDB>> | null = null;
 
@@ -104,6 +118,12 @@ export const getDB = (): Promise<IDBPDatabase<HavorkaDB>> => {
           });
           chunkStore.createIndex('by_session', 'sessionId');
           chunkStore.createIndex('by_session_segment', ['sessionId', 'segmentIndex']);
+        }
+
+        // 4. Photos store (Blobs)
+        if (!db.objectStoreNames.contains('photos')) {
+          const photoStore = db.createObjectStore('photos', { keyPath: 'id' });
+          photoStore.createIndex('by_created', 'createdAt');
         }
       },
     });

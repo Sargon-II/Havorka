@@ -52,3 +52,22 @@ if (result.error) {
 if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
+
+// Locate generated APK and copy to convenient output locations
+const tempDir = process.env.TEMP || process.env.TMP || '/tmp';
+const possibleApkLocations = [
+  path.join(tempDir, 'havorka_build', 'app', 'outputs', 'apk', 'debug', 'app-debug.apk'),
+  path.join(androidDir, 'build_out', 'app', 'outputs', 'apk', 'debug', 'app-debug.apk'),
+  path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk'),
+];
+
+for (const apkPath of possibleApkLocations) {
+  if (fs.existsSync(apkPath)) {
+    const stats = fs.statSync(apkPath);
+    console.log(`[build-android] Found APK at ${apkPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+    const targetApk = path.join(androidDir, 'app-debug.apk');
+    fs.copyFileSync(apkPath, targetApk);
+    console.log(`[build-android] Successfully copied APK to ${targetApk}`);
+    break;
+  }
+}

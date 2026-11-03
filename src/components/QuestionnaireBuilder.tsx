@@ -33,6 +33,15 @@ import {
 } from '../lib/recording/wavConverter';
 import { saveFile, getAudioExtension } from '../platform/files';
 import { openNativeAppSettings, isCapacitorAndroid } from '../platform/nativeRecording';
+import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
+import {
+  savePhotoBlob,
+  getPhotoBlob,
+  deletePhotoBlob,
+  processImageTo1600JpegBlob,
+  CulturalPhotoMeta,
+  migrateLegacyPhotosFromLocalStorage
+} from '../lib/storage/photoStore';
 
 interface QuestionnaireBuilderProps {
   questionnaire: Questionnaire;
@@ -227,22 +236,17 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   // Selected question flat pointer active carousel
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
 
-  // CulturalPhoto interface for material culture photofixation and attribution
-  interface CulturalPhoto {
-    id: string;
-    imgData: string; // base64 string
-    category: 'utensils' | 'buildings' | 'costume' | 'inventory' | 'other';
-    title: string;
-    age: string;
-    description: string;
-    timestamp: string; // stopwatch epoch timestamp e.g. "04:12"
-  }
+  // Material Culture Photos attributes state (metadata in IndexedDB kv store, blobs in photos store)
+  const [culturalPhotos, setCulturalPhotos] = usePersistentState<CulturalPhotoMeta[]>('field_cultural_photos_meta', []);
 
-  // Material Culture Photos attributes state
-  const [culturalPhotos, setCulturalPhotos] = usePersistentState<CulturalPhoto[]>('field_cultural_photos', []);
+  // Thumbnail ObjectURLs cache for active viewing without re-reading blobs on each render
+  const [photoThumbnails, setPhotoThumbnails] = useState<Record<string, string>>({});
 
   const [cameraActive, setCameraActive] = useState(false);
-  const [capturedImageBase64, setCapturedImageBase64] = useState<string | null>(null);
+  const [tempPhotoPreviewUrl, setTempPhotoPreviewUrl] = useState<string | null>(null);
+  const tempPhotoBlobRef = useRef<Blob | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -250,7 +254,56 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   const [photoTitle, setPhotoTitle] = useState('');
   const [photoCategory, setPhotoCategory] = useState<'utensils' | 'buildings' | 'costume' | 'inventory' | 'other'>('utensils');
   const [photoAge, setPhotoAge] = useState('');
+  const [photoDescription, setPhotoDescription] = useState('');
   const [micPermissionDenied, setMicPermissionDenied] = useState(false);
+  const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
+
+  // Requirement 3: Migrate legacy base64 photos from localStorage on mount
+  useEffect(() => {
+    let mounted = true;
+    const checkPhotoMigration = async () => {
+      try {
+        const migrated = await migrateLegacyPhotosFromLocalStorage();
+        if (migrated && migrated.length > 0 && mounted) {
+          setCulturalPhotos(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const fresh = migrated.filter(m => !existingIds.has(m.id));
+            return [...prev, ...fresh];
+          });
+        }
+      } catch (err) {
+        console.error('Failed to migrate legacy photos:', err);
+      }
+    };
+    checkPhotoMigration();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Load thumbnail ObjectURLs for culturalPhotos from IndexedDB Blob store
+  useEffect(() => {
+    let cancelled = false;
+    const loadMissingThumbnails = async () => {
+      for (const photo of culturalPhotos) {
+        if (!photoThumbnails[photo.id]) {
+          try {
+            const blob = await getPhotoBlob(photo.id);
+            if (blob && !cancelled) {
+              const url = URL.createObjectURL(blob);
+              setPhotoThumbnails(prev => ({ ...prev, [photo.id]: url }));
+            }
+          } catch (e) {
+            console.error('Failed to load photo blob for', photo.id, e);
+          }
+        }
+      }
+    };
+    loadMissingThumbnails();
+    return () => {
+      cancelled = true;
+    };
+  }, [culturalPhotos]);
 
   // Multi-segment export modal state (AAC/WebM containers cannot be glued)
   const [segmentModalData, setSegmentModalData] = useState<{
@@ -352,6 +405,8 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
       questionIndexInBlock: qi,
       colorToken: b.colorToken
     })));
+
+  const activeQuestion = flatQuestions[activeQuestionIndex] || flatQuestions[0];
 
   // Listen to keyboard up/down arrows for fast tactile controls in field (under un-focused states)
   useEffect(() => {
@@ -874,10 +929,14 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     }
   };
 
-  // Start the device's camera stream for live photofixation
+  // Start the device's web camera stream for live photofixation (Web/Desktop)
   const startCamera = async () => {
     try {
-      setCapturedImageBase64(null);
+      if (tempPhotoPreviewUrl) {
+        URL.revokeObjectURL(tempPhotoPreviewUrl);
+        setTempPhotoPreviewUrl(null);
+      }
+      tempPhotoBlobRef.current = null;
       setCameraActive(true);
       // Let React mount the video element, then access getUserMedia
       setTimeout(async () => {
@@ -888,11 +947,16 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error("Camera stream start failed:", err);
-          showToast(lang === 'ru' 
-            ? '⚠️ Камера недоступна (заблокировано или не поддерживается). Вы можете загрузить готовый файл.' 
-            : '⚠️ Camera unavailable. Please upload a photo instead.');
+          const errStr = (err?.name || err?.message || String(err)).toLowerCase();
+          if (errStr.includes('denied') || errStr.includes('notallowed') || errStr.includes('permission')) {
+            setCameraPermissionDenied(true);
+          } else {
+            showToast(lang === 'ru' 
+              ? '⚠️ Камера недоступна (заблокировано или не поддерживается). Вы можете выбрать фото из галереи.' 
+              : '⚠️ Camera unavailable. Please pick a photo from gallery.');
+          }
           setCameraActive(false);
         }
       }, 150);
@@ -911,7 +975,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     setCameraActive(false);
   };
 
-  // Capture current frame from the camera stream
+  // Capture current frame from the camera stream (Web/Desktop)
   const takeSnapshot = () => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
@@ -922,70 +986,200 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
         canvas.height = video.videoHeight || 480;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         try {
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-          setCapturedImageBase64(dataUrl);
-          stopCamera();
+          canvas.toBlob(async (rawBlob) => {
+            if (!rawBlob) return;
+            try {
+              const { blob } = await processImageTo1600JpegBlob(rawBlob);
+              if (tempPhotoPreviewUrl) {
+                URL.revokeObjectURL(tempPhotoPreviewUrl);
+              }
+              tempPhotoBlobRef.current = blob;
+              setTempPhotoPreviewUrl(URL.createObjectURL(blob));
+              stopCamera();
+            } catch (err) {
+              console.error("Failed to process snapshot blob:", err);
+            }
+          }, 'image/jpeg', 0.85);
         } catch (err) {
-          console.error("Failed to capture image data URL:", err);
+          console.error("Failed to capture image data:", err);
         }
       }
     }
   };
 
-  // Base64 file uploader fallback
-  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        setCapturedImageBase64(dataUrl);
-        stopCamera();
+  // Requirement 2: Android Capacitor Camera or Web/Desktop trigger
+  const handleTakeNativePhoto = async (source: CameraSource = CameraSource.Camera) => {
+    try {
+      if (isCapacitorAndroid()) {
+        try {
+          const image = await CapCamera.getPhoto({
+            quality: 80,
+            allowEditing: false,
+            resultType: CameraResultType.Uri,
+            source: source,
+            width: 1600,
+            correctOrientation: true,
+          });
+
+          if (image.webPath) {
+            const res = await fetch(image.webPath);
+            const rawBlob = await res.blob();
+            const { blob } = await processImageTo1600JpegBlob(rawBlob);
+            if (tempPhotoPreviewUrl) {
+              URL.revokeObjectURL(tempPhotoPreviewUrl);
+            }
+            tempPhotoBlobRef.current = blob;
+            setTempPhotoPreviewUrl(URL.createObjectURL(blob));
+          }
+        } catch (err: any) {
+          console.warn('Capacitor camera error:', err);
+          const errMsg = (err?.message || String(err)).toLowerCase();
+          if (
+            errMsg.includes('permission') || 
+            errMsg.includes('denied') || 
+            errMsg.includes('access') ||
+            errMsg.includes('blocked')
+          ) {
+            setCameraPermissionDenied(true);
+          } else if (!errMsg.includes('cancel') && !errMsg.includes('closed') && !errMsg.includes('user cancelled')) {
+            showToast(`Ошибка камеры: ${err?.message || err}`);
+          }
+        }
+      } else {
+        if (source === CameraSource.Photos) {
+          fileInputRef.current?.click();
+        } else {
+          startCamera();
+        }
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (e: any) {
+      console.error('Camera interaction error:', e);
+    }
   };
 
-  // Attach the current photo along with professional ethnological attributes to the state list
-  const handleSavePhotoItem = () => {
-    if (!capturedImageBase64) {
+  // Base64/Blob file uploader fallback (gallery/disk on Web/Desktop)
+  const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const { blob } = await processImageTo1600JpegBlob(file);
+      if (tempPhotoPreviewUrl) {
+        URL.revokeObjectURL(tempPhotoPreviewUrl);
+      }
+      tempPhotoBlobRef.current = blob;
+      setTempPhotoPreviewUrl(URL.createObjectURL(blob));
+      stopCamera();
+    } catch (err) {
+      console.error('Failed to process uploaded file:', err);
+      showToast(lang === 'ru' ? '⚠️ Ошибка при обработке изображения' : '⚠️ Image processing error');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  // Requirement 3: Attach photo to IndexedDB (as Blob in photos store, metadata in kv store)
+  const handleSavePhotoItem = async () => {
+    const blob = tempPhotoBlobRef.current;
+    if (!blob) {
       showToast(lang === 'ru' 
-        ? '⚠️ Сделайте снимок через камеру или загрузите файл изображения!' 
+        ? '⚠️ Сделайте снимок через камеру или выберите файл изображения!' 
         : '⚠️ Please snapshot or choose an image file first!');
       return;
     }
 
     const currentTimestampString = formatTime(secondsElapsed);
-    const newPhotoItem: CulturalPhoto = {
-      id: 'photo_' + Date.now(),
-      imgData: capturedImageBase64,
-      category: photoCategory,
-      title: photoTitle.trim() || (lang === 'ru' ? 'Безымянный артефакт' : 'Unnamed artifact'),
-      age: photoAge.trim() || (lang === 'ru' ? 'неизвестно' : 'unknown'),
-      description: photoDescription.trim(),
-      timestamp: currentTimestampString
-    };
+    const photoId = 'photo_' + Date.now();
 
-    setCulturalPhotos(prev => [...prev, newPhotoItem]);
-    
-    // Clear and reset form fields
-    setCapturedImageBase64(null);
-    setPhotoTitle('');
-    setPhotoCategory('utensils');
-    setPhotoAge('');
-    setPhotoDescription('');
-    stopCamera();
+    try {
+      // 1. Save Blob to IndexedDB photos store
+      await savePhotoBlob(photoId, blob);
 
-    showToast(lang === 'ru' 
-      ? '✅ Предмет материальной культуры сохранен и привязан к отчету!' 
-      : '✅ Object saved and linked to report!');
+      // 2. Add metadata record to state and kv store
+      const newPhotoItem: CulturalPhotoMeta = {
+        id: photoId,
+        category: photoCategory,
+        title: photoTitle.trim() || (lang === 'ru' ? 'Безымянный артефакт' : 'Unnamed artifact'),
+        age: photoAge.trim() || (lang === 'ru' ? 'неизвестно' : 'unknown'),
+        description: photoDescription.trim(),
+        timestamp: currentTimestampString,
+        createdAt: Date.now()
+      };
+
+      setCulturalPhotos(prev => [...prev, newPhotoItem]);
+      if (tempPhotoPreviewUrl) {
+        setPhotoThumbnails(prev => ({ ...prev, [photoId]: tempPhotoPreviewUrl }));
+      }
+
+      // Reset form and temp state
+      tempPhotoBlobRef.current = null;
+      setTempPhotoPreviewUrl(null);
+      setPhotoTitle('');
+      setPhotoCategory('utensils');
+      setPhotoAge('');
+      setPhotoDescription('');
+      stopCamera();
+
+      showToast(lang === 'ru' 
+        ? '✅ Предмет материальной культуры сохранен и привязан к отчету!' 
+        : '✅ Object saved and linked to report!');
+    } catch (err: any) {
+      console.error('Failed to save photo to IndexedDB:', err);
+      showToast(`Ошибка сохранения фото: ${err.message || err}`);
+    }
   };
 
-  // Delete specific cultural photo from list
-  const handleDeletePhotoItem = (photoId: string) => {
-    setCulturalPhotos(prev => prev.filter(p => p.id !== photoId));
-    showToast(lang === 'ru' ? '🗑️ Фотофиксация предмета удалена' : '🗑️ Photograph removed');
+  // Delete specific cultural photo from IndexedDB and state
+  const handleDeletePhotoItem = async (photoId: string) => {
+    try {
+      await deletePhotoBlob(photoId);
+      setCulturalPhotos(prev => prev.filter(p => p.id !== photoId));
+      setPhotoThumbnails(prev => {
+        const next = { ...prev };
+        if (next[photoId]) {
+          URL.revokeObjectURL(next[photoId]);
+          delete next[photoId];
+        }
+        return next;
+      });
+      showToast(lang === 'ru' ? '🗑️ Фотофиксация предмета удалена' : '🗑️ Photograph removed');
+    } catch (err: any) {
+      console.error('Failed to delete photo from IndexedDB:', err);
+    }
+  };
+
+  // Requirement 4: Export all attached cultural photos as a ZIP archive sequentially
+  const handleExportPhotosZip = async () => {
+    if (!culturalPhotos.length) return;
+    try {
+      showToast(lang === 'ru' ? 'Сборка фотоархива ZIP...' : 'Зборка фотаархіва ZIP...');
+      const JSZipModule = await import('jszip');
+      const JSZip = (JSZipModule as any).default || JSZipModule;
+      const zip = new JSZip();
+
+      // Read Blobs sequentially from IndexedDB to avoid out-of-memory errors
+      for (let i = 0; i < culturalPhotos.length; i++) {
+        const p = culturalPhotos[i];
+        const blob = await getPhotoBlob(p.id);
+        if (blob) {
+          const safeName = (p.title || `photo_${i + 1}`).replace(/[\\/:*?"<>|]/g, '_');
+          zip.file(`${i + 1}_${safeName}.jpg`, blob);
+        }
+      }
+
+      const manifest = culturalPhotos.map((p, idx) =>
+        `${idx + 1}. [${p.category}] ${p.title}\n   Датировка: ${p.age}\n   Таймкод: ${p.timestamp}\n   Описание: ${p.description}\n`
+      ).join('\n');
+      zip.file('описание_предметов.txt', manifest);
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const safeInf = (sessionInformant || 'Экспедиция').replace(/[\\/:*?"<>|]/g, '_');
+      const dateStr = sessionDate || new Date().toISOString().slice(0, 10);
+      await saveFile(zipBlob, `Фотофиксация_${safeInf}_${dateStr}.zip`, 'application/zip');
+      showToast(lang === 'ru' ? 'Архив фотографий успешно сохранён!' : 'Архіў фотаздымкаў паспяхова захаваны!');
+    } catch (err: any) {
+      console.error('Failed to export photos ZIP:', err);
+      showToast(`Ошибка экспорта фото: ${err.message || err}`);
+    }
   };
 
   // Mark status & automatically log the precision record stopwatch timecode
@@ -1024,7 +1218,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   };
 
   // Export interview session directly as a real .docx document (questions, status markings, timeline tags, and ethnographic notes)
-  const exportSessionToDocx = () => {
+  const exportSessionToDocx = async () => {
     // 1. Explicitly stop the recording/timer (Остановка записи)
     setTimerActive(false);
 
@@ -1166,7 +1360,8 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
           new Paragraph({ text: "" })
         );
 
-        culturalPhotos.forEach((photo, pIdx) => {
+        for (let pIdx = 0; pIdx < culturalPhotos.length; pIdx++) {
+          const photo = culturalPhotos[pIdx];
           let catText = "";
           if (photo.category === 'utensils') {
             catText = lang === 'ru' ? "Утварь (предмет домашнего обихода / убранство)" : "Начынне (рэчы хатняга ўжытку / аздоба)";
@@ -1213,24 +1408,29 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
             new Paragraph({ text: "" })
           );
 
+          // Requirement 4: Read photo Blob sequentially from IndexedDB to avoid out-of-memory errors
           try {
-            const imgBytes = base64ToUint8Array(photo.imgData);
-            children.push(
-              new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [
-                  new ImageRun({
-                    data: imgBytes,
-                    type: "jpg",
-                    transformation: {
-                      width: 400,
-                      height: 300
-                    }
-                  })
-                ]
-              }),
-              new Paragraph({ text: "" })
-            );
+            const blob = await getPhotoBlob(photo.id);
+            if (blob) {
+              const arrBuf = await blob.arrayBuffer();
+              const imgBytes = new Uint8Array(arrBuf);
+              children.push(
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  children: [
+                    new ImageRun({
+                      data: imgBytes,
+                      type: "jpg",
+                      transformation: {
+                        width: 400,
+                        height: 300
+                      }
+                    })
+                  ]
+                }),
+                new Paragraph({ text: "" })
+              );
+            }
           } catch (imgError) {
             console.error("Failed to add image to word document:", imgError);
             children.push(
@@ -1242,7 +1442,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
               new Paragraph({ text: "" })
             );
           }
-        });
+        }
       }
 
       const doc = new Document({
@@ -1463,6 +1663,63 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
               <button
                 type="button"
                 onClick={() => setMicPermissionDenied(false)}
+                className="px-4 py-2.5 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer"
+              >
+                {lang === 'ru' ? 'Понятно / Закрыть' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Camera Permission Denied Modal */}
+      {cameraPermissionDenied && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border-2 border-red-500/20 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <AlertCircle className="w-7 h-7 shrink-0" />
+              <h3 className="text-lg font-black font-sans">
+                {lang === 'ru' ? 'Доступ к камере заблокирован' : lang === 'by' ? 'Доступ да камеры заблакаваны' : 'Camera Access Denied'}
+              </h3>
+            </div>
+            <p className="text-sm text-stone-700 leading-relaxed">
+              {lang === 'ru'
+                ? 'Для фотофиксации объектов материальной культуры приложению требуется разрешение на камеру. Доступ был отклонен или заблокирован в системе.'
+                : lang === 'by'
+                ? 'Для фотафіксацыі аб\'ектаў матэрыяльнай культуры патрабуецца дазвол на камеру. Доступ быў заблакаваны ў сістэме.'
+                : 'Camera permission is required to capture photos of material culture artifacts.'}
+            </p>
+            <div className="p-3 bg-stone-100 rounded-xl text-xs text-stone-800 space-y-1">
+              <p className="font-bold">
+                {lang === 'ru' ? 'Инструкция для Android / браузера:' : 'Instructions:'}
+              </p>
+              <p>
+                {lang === 'ru'
+                  ? '1. Откройте «Настройки устройства → Приложения → Havorka → Разрешения → Камера».'
+                  : '1. Open Device Settings → Apps → Havorka → Permissions → Camera.'}
+              </p>
+              <p>
+                {lang === 'ru'
+                  ? '2. Выберите «Разрешать только во время использования приложения».'
+                  : '2. Select "Allow only while using the app".'}
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              {isCapacitorAndroid() && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await openNativeAppSettings();
+                    setCameraPermissionDenied(false);
+                  }}
+                  className="px-4 py-2.5 bg-[#B66029] hover:bg-[#8d481f] text-white rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-xs"
+                >
+                  {lang === 'ru' ? 'Настройки устройства' : 'Open Settings'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setCameraPermissionDenied(false)}
                 className="px-4 py-2.5 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer"
               >
                 {lang === 'ru' ? 'Понятно / Закрыть' : 'Close'}
@@ -1905,9 +2162,20 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                       </div>
                     </div>
                     {culturalPhotos.length > 0 && (
-                      <span className="font-mono text-xs font-black bg-[#B66029]/10 text-[#B66029] px-2.5 py-1 rounded-full shrink-0">
-                        {lang === 'ru' ? `Экспортируется: ${culturalPhotos.length}` : lang === 'by' ? `Экспартуецца: ${culturalPhotos.length}` : `Attached: ${culturalPhotos.length}`}
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleExportPhotosZip}
+                          className="px-2.5 py-1 bg-stone-800 hover:bg-stone-900 text-white rounded-md text-[11px] font-bold tracking-wide transition-all flex items-center gap-1 cursor-pointer shadow-xs"
+                          title="Скачать все фотографии архивом ZIP"
+                        >
+                          <FileDown className="w-3.5 h-3.5" />
+                          {lang === 'ru' ? 'Скачать .zip' : lang === 'by' ? 'Спампаваць .zip' : 'Download .zip'}
+                        </button>
+                        <span className="font-mono text-xs font-black bg-[#B66029]/10 text-[#B66029] px-2.5 py-1 rounded-full">
+                          {lang === 'ru' ? `Экспортируется: ${culturalPhotos.length}` : lang === 'by' ? `Экспартуецца: ${culturalPhotos.length}` : `Attached: ${culturalPhotos.length}`}
+                        </span>
+                      </div>
                     )}
                   </div>
 
@@ -1941,32 +2209,42 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                               </button>
                             </div>
                           </>
-                        ) : capturedImageBase64 ? (
+                        ) : tempPhotoPreviewUrl ? (
                           <>
                             <img 
-                              src={capturedImageBase64} 
+                              src={tempPhotoPreviewUrl} 
                               alt="Captured Preview" 
                               className="absolute inset-0 w-full h-full object-contain bg-stone-900"
                               referrerPolicy="no-referrer"
                             />
                             <div 
                               className="absolute top-2 right-2 bg-stone-900/80 hover:bg-stone-900 hover:scale-105 rounded-full p-2 text-white cursor-pointer transition-transform flex items-center justify-center" 
-                              onClick={() => setCapturedImageBase64(null)}
+                              onClick={() => {
+                                if (tempPhotoPreviewUrl) URL.revokeObjectURL(tempPhotoPreviewUrl);
+                                tempPhotoBlobRef.current = null;
+                                setTempPhotoPreviewUrl(null);
+                              }}
+                              title="Отменить фото"
                             >
                               <X className="w-4 h-4" />
                             </div>
                             <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2 px-4">
-                              <label className="px-3 py-1.5 bg-stone-800 hover:bg-stone-900 text-white rounded-md text-[10px] font-bold uppercase tracking-widest cursor-pointer transition-all flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleTakeNativePhoto(CameraSource.Camera)}
+                                className="px-3 py-1.5 bg-stone-800 hover:bg-stone-900 text-white rounded-md text-[10px] font-bold uppercase tracking-widest cursor-pointer transition-all flex items-center gap-1"
+                              >
+                                <Camera className="w-3 h-3" />
+                                {lang === 'ru' ? 'Переснять' : lang === 'by' ? 'Перазняць' : 'Retake'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleTakeNativePhoto(CameraSource.Photos)}
+                                className="px-3 py-1.5 bg-stone-800 hover:bg-stone-900 text-white rounded-md text-[10px] font-bold uppercase tracking-widest cursor-pointer transition-all flex items-center gap-1"
+                              >
                                 <Image className="w-3 h-3" />
-                                {lang === 'ru' ? 'Переснять / заменить' : lang === 'by' ? 'Перазняць / замяніць' : 'Replace Photo'}
-                                <input 
-                                  type="file" 
-                                  accept="image/*" 
-                                  capture="environment" 
-                                  onChange={handleImageFileUpload} 
-                                  className="hidden" 
-                                />
-                              </label>
+                                {lang === 'ru' ? 'Из галереи' : lang === 'by' ? 'З галерэі' : 'From Gallery'}
+                              </button>
                             </div>
                           </>
                         ) : (
@@ -1978,33 +2256,39 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                               </p>
                               <p className="text-[10px] text-stone-500 mt-1 leading-relaxed">
                                 {lang === 'ru' 
-                                  ? 'Сделайте мгновенное фото через камеру устройства или выберите файл изображения с диска' 
+                                  ? 'Сделайте фото камерой или выберите готовое изображение из галереи' 
                                   : lang === 'by' 
-                                  ? 'Зрабіце імгненнае фота праз камеру прылады або выберыце файл выявы з дыска' 
-                                  : 'Capture with your device camera or upload an image file'}
+                                  ? 'Зрабіце фота камерай або выберыце гатовую выяву з галерэі' 
+                                  : 'Capture with camera or choose an image from gallery'}
                               </p>
                             </div>
                             <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
                               <button
                                 type="button"
-                                onClick={startCamera}
+                                onClick={() => handleTakeNativePhoto(CameraSource.Camera)}
                                 className="w-full sm:w-auto px-4 py-2.5 bg-[#B66029] hover:bg-[#86400f] text-white rounded-lg text-xs font-bold uppercase tracking-wider shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                               >
                                 <Camera className="w-4 h-4" />
-                                {lang === 'ru' ? 'Веб-камера' : lang === 'by' ? 'Вэб-камера' : 'Webcam'}
+                                {isCapacitorAndroid()
+                                  ? (lang === 'ru' ? 'Сделать фото' : lang === 'by' ? 'Зрабіць фота' : 'Take Photo')
+                                  : (lang === 'ru' ? 'Веб-камера' : lang === 'by' ? 'Вэб-камера' : 'Webcam')}
                               </button>
                               
-                              <label className="w-full sm:w-auto px-4 py-2.5 bg-stone-800 hover:bg-stone-900 text-white border border-stone-700 hover:border-stone-600 rounded-lg text-xs font-bold uppercase tracking-wider text-center cursor-pointer transition-all flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleTakeNativePhoto(CameraSource.Photos)}
+                                className="w-full sm:w-auto px-4 py-2.5 bg-stone-800 hover:bg-stone-900 text-white border border-stone-700 hover:border-stone-600 rounded-lg text-xs font-bold uppercase tracking-wider text-center cursor-pointer transition-all flex items-center justify-center gap-1.5"
+                              >
                                 <Image className="w-4 h-4" />
-                                {lang === 'ru' ? 'Фото с диска' : lang === 'by' ? 'Фота з дыска' : 'Upload File'}
-                                <input 
-                                  type="file" 
-                                  accept="image/*" 
-                                  capture="environment" 
-                                  onChange={handleImageFileUpload} 
-                                  className="hidden" 
-                                />
-                              </label>
+                                {lang === 'ru' ? 'Выбрать из галереи' : lang === 'by' ? 'Выбраць з галерэі' : 'Pick from Gallery'}
+                              </button>
+                              <input 
+                                ref={fileInputRef}
+                                type="file" 
+                                accept="image/*" 
+                                onChange={handleImageFileUpload} 
+                                className="hidden" 
+                              />
                             </div>
                           </div>
                         )}
@@ -2107,12 +2391,18 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                               className="bg-white border border-stone-200 rounded-xl p-3 flex flex-col space-y-3 relative group overflow-hidden shadow-4xs"
                             >
                               <div className="aspect-video bg-stone-100 rounded-lg overflow-hidden relative">
-                                <img 
-                                  src={photo.imgData} 
-                                  alt={photo.title}
-                                  className="w-full h-full object-cover"
-                                  referrerPolicy="no-referrer"
-                                />
+                                {photoThumbnails[photo.id] ? (
+                                  <img 
+                                    src={photoThumbnails[photo.id]} 
+                                    alt={photo.title}
+                                    className="w-full h-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center bg-stone-200 text-stone-400">
+                                    <Camera className="w-6 h-6 animate-pulse" />
+                                  </div>
+                                )}
                                 <span className="absolute top-2 left-2 bg-stone-900/85 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0">
                                   {catBadge}
                                 </span>
