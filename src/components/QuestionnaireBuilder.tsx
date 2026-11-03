@@ -18,6 +18,10 @@ import { gsap } from 'gsap';
 import { decodeGeminiError, DecodedError } from '../lib/errorDecoder';
 import { generateText } from '../lib/gemini';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, ImageRun } from 'docx';
+import { usePersistentState } from '../lib/storage/usePersistentState';
+import { getKV, setKV } from '../lib/storage/db';
+import { useRecorder } from '../lib/recording/useRecorder';
+import { exportSessionBlob } from '../lib/recording/recorder';
 
 interface QuestionnaireBuilderProps {
   questionnaire: Questionnaire;
@@ -170,53 +174,44 @@ const localT = {
 
 export default function QuestionnaireBuilder({ questionnaire, onChange, lang, researcherName }: QuestionnaireBuilderProps) {
   // Modes: 'field' (large, warm, offline interview assistant) or 'editor' (management)
-  const [activeMode, setActiveMode] = useState<'field' | 'editor'>(() => {
-    return (localStorage.getItem('questionnaire_active_mode') as 'field' | 'editor') || 'field';
-  });
+  const [activeMode, setActiveMode] = usePersistentState<'field' | 'editor'>('questionnaire_active_mode', 'field');
 
   // Session variables
-  const [sessionInformant, setSessionInformant] = useState(() => {
-    return localStorage.getItem('field_session_informant') || 'И-01 (д. Поречье)';
-  });
-  const [sessionLocation, setSessionLocation] = useState(() => {
-    return localStorage.getItem('field_session_location') || 'д. Поречье, Гродненский р-н';
-  });
-  const [sessionDate, setSessionDate] = useState(() => {
-    return localStorage.getItem('field_session_date') || new Date().toISOString().split('T')[0];
-  });
-  const [sessionResearcher, setSessionResearcher] = useState(() => {
-    return localStorage.getItem('researcher_name') || researcherName || 'Слобожанин М.М.';
-  });
+  const [sessionInformant, setSessionInformant] = usePersistentState<string>('field_session_informant', '');
+  const [sessionLocation, setSessionLocation] = usePersistentState<string>('field_session_location', '');
+  const [sessionDate, setSessionDate] = usePersistentState<string>('field_session_date', new Date().toISOString().split('T')[0]);
+  const [sessionResearcher, setSessionResearcher] = usePersistentState<string>('researcher_name', researcherName || '');
 
-  // Timer/stopwatch for field dictaphone tracking
+  // Robust Audio Recorder hook and stopwatch tracking
   const [timerActive, setTimerActive] = useState(false);
   const [secondsElapsed, setSecondsElapsed] = useState(0);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Audio recording refs and states
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(() => {
-    // Attempt cache restoration if possible, but keep simple
-    return null;
-  });
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [isRecordingSupported, setIsRecordingSupported] = useState(true);
+  const {
+    status: recorderStatus,
+    audioLevel,
+    alert: recorderAlert,
+    requiresUserGesture,
+    audioBlob,
+    audioUrl,
+    currentSession,
+    unfinishedSessions,
+    startRecording,
+    pauseRecording,
+    resumeRecording,
+    stopRecording,
+    resumeWithUserGesture,
+    recoverSession,
+    discardUnfinishedSession,
+    cleanupAudio,
+    getRealElapsedTimeMs,
+    setAudioBlob,
+    setAudioUrl,
+  } = useRecorder();
 
   // Question individual responses status mapping (global keys)
-  const [questionStatuses, setQuestionStatuses] = useState<Record<string, 'unasked' | 'asked' | 'skipped' | 'later'>>(() => {
-    const saved = localStorage.getItem('field_session_statuses');
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [questionNotes, setQuestionNotes] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('field_session_notes');
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [questionMarkedTimes, setQuestionMarkedTimes] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('field_session_marked_times');
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [questionStatuses, setQuestionStatuses] = usePersistentState<Record<string, 'unasked' | 'asked' | 'skipped' | 'later'>>('field_session_statuses', {});
+  const [questionNotes, setQuestionNotes] = usePersistentState<Record<string, string>>('field_session_notes', {});
+  const [questionMarkedTimes, setQuestionMarkedTimes] = usePersistentState<Record<string, string>>('field_session_marked_times', {});
 
   // Selected question flat pointer active carousel
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
@@ -233,14 +228,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   }
 
   // Material Culture Photos attributes state
-  const [culturalPhotos, setCulturalPhotos] = useState<CulturalPhoto[]>(() => {
-    try {
-      const saved = localStorage.getItem('field_cultural_photos');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
-    }
-  });
+  const [culturalPhotos, setCulturalPhotos] = usePersistentState<CulturalPhoto[]>('field_cultural_photos', []);
 
   const [cameraActive, setCameraActive] = useState(false);
   const [capturedImageBase64, setCapturedImageBase64] = useState<string | null>(null);
@@ -252,11 +240,6 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   const [photoCategory, setPhotoCategory] = useState<'utensils' | 'buildings' | 'costume' | 'inventory' | 'other'>('utensils');
   const [photoAge, setPhotoAge] = useState('');
   const [photoDescription, setPhotoDescription] = useState('');
-
-  // Sync cultural photos to localStorage
-  useEffect(() => {
-    localStorage.setItem('field_cultural_photos', JSON.stringify(culturalPhotos));
-  }, [culturalPhotos]);
 
   // States for the inline Template Editor modes (no window.prompts!)
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
@@ -292,55 +275,30 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     return () => ctx.revert();
   }, [questionnaire.blocks.length, activeMode]);
 
-  // Sync timers
+  // Sync timers with robust recorder state and real elapsed time
   useEffect(() => {
-    if (timerActive) {
-      timerRef.current = setInterval(() => {
-        setSecondsElapsed(prev => prev + 1);
-      }, 1000);
+    if (recorderStatus === 'recording') {
+      setTimerActive(true);
+      const interval = setInterval(() => {
+        const ms = getRealElapsedTimeMs();
+        setSecondsElapsed(Math.floor(ms / 1000));
+      }, 500);
+      return () => clearInterval(interval);
+    } else if (recorderStatus === 'paused') {
+      setTimerActive(false);
+      const ms = getRealElapsedTimeMs();
+      setSecondsElapsed(Math.floor(ms / 1000));
     } else {
-      if (timerRef.current) clearInterval(timerRef.current);
+      setTimerActive(false);
     }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [timerActive]);
-
-  // Sync session details and answers in real-time
-  useEffect(() => {
-    localStorage.setItem('field_session_informant', sessionInformant);
-  }, [sessionInformant]);
-
-  useEffect(() => {
-    localStorage.setItem('field_session_location', sessionLocation);
-  }, [sessionLocation]);
-
-  useEffect(() => {
-    localStorage.setItem('field_session_date', sessionDate);
-  }, [sessionDate]);
-
-  useEffect(() => {
-    localStorage.setItem('questionnaire_active_mode', activeMode);
-  }, [activeMode]);
-
-  useEffect(() => {
-    localStorage.setItem('field_session_statuses', JSON.stringify(questionStatuses));
-  }, [questionStatuses]);
-
-  useEffect(() => {
-    localStorage.setItem('field_session_notes', JSON.stringify(questionNotes));
-  }, [questionNotes]);
-
-  useEffect(() => {
-    localStorage.setItem('field_session_marked_times', JSON.stringify(questionMarkedTimes));
-  }, [questionMarkedTimes]);
+  }, [recorderStatus, getRealElapsedTimeMs]);
 
   // Pre-load researcher name changes
   useEffect(() => {
     if (researcherName && researcherName !== 'Введите ФИО' && researcherName !== 'Увядзіце ПІБ' && researcherName !== '请输入姓名') {
       setSessionResearcher(researcherName);
     }
-  }, [researcherName]);
+  }, [researcherName, setSessionResearcher]);
 
   // Help notification utility
   const showToast = (msg: string) => {
@@ -398,7 +356,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   // Safe update wrapper
   const updateQuestionnaire = (updated: Questionnaire) => {
     onChange(updated);
-    localStorage.setItem('sociologist_questionnaire', JSON.stringify(updated));
+    setKV('sociologist_questionnaire', updated).catch(console.error);
   };
 
   // Rule-based text file parser
@@ -626,12 +584,8 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   };
 
   // Transfer specific question note context into the Field Diaries database
-  const sendActiveTextToDiary = (qText: string, status: string, notes: string) => {
-    const saved = localStorage.getItem('field_diary');
-    let entries = [];
-    if (saved) {
-      try { entries = JSON.parse(saved); } catch (e) { console.error(e); }
-    }
+  const sendActiveTextToDiary = async (qText: string, status: string, notes: string) => {
+    const entries = (await getKV<any[]>('field_diary')) || [];
 
     const currentStatusLabel = 
       status === 'asked' ? 'Задан / Есть ответ' : 
@@ -646,90 +600,50 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
       notes: `[ВЫСКАЗЫВАНИЕ ИЗ ОПРОСНИКА]\nВопрос: «${qText}»\nСтатус: ${currentStatusLabel}\n现场记实: ${notes || 'Без заметок'}`
     };
 
-    entries = [entry, ...entries];
-    localStorage.setItem('field_diary', JSON.stringify(entries));
+    const updated = [entry, ...entries];
+    await setKV('field_diary', updated);
     showToast(lt.btnPushToDiarySuccess);
   };
 
   // Start or resume audio recording
   const startAudioRecording = async () => {
     try {
-      if (!mediaRecorderRef.current) {
-        audioChunksRef.current = [];
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamRef.current = stream;
-        
-        let options = {};
-        if (MediaRecorder.isTypeSupported('audio/mpeg')) {
-          options = { mimeType: 'audio/mpeg' };
-        } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-          options = { mimeType: 'audio/webm;codecs=opus' };
-        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          options = { mimeType: 'audio/mp4' };
-        } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
-          options = { mimeType: 'audio/ogg;codecs=opus' };
-        } else if (MediaRecorder.isTypeSupported('audio/wav')) {
-          options = { mimeType: 'audio/wav' };
-        }
-
-        const recorder = new MediaRecorder(stream, options);
-        mediaRecorderRef.current = recorder;
-
-        recorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
-            audioChunksRef.current.push(event.data);
-          }
-        };
-
-        recorder.onstop = () => {
-          const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/mpeg' });
-          setAudioBlob(blob);
-          const url = URL.createObjectURL(blob);
-          setAudioUrl(url);
-        };
-
-        recorder.start(1000); // chunk buffer interval
+      if (recorderStatus === 'idle' || recorderStatus === 'completed' || recorderStatus === 'error') {
+        await startRecording({
+          informant: sessionInformant,
+          location: sessionLocation,
+          date: sessionDate,
+          researcher: sessionResearcher,
+        });
+        setTimerActive(true);
         showToast(lang === 'ru' ? '🎤 Запись звука начата!' : lang === 'by' ? '🎤 Запіс гуку пачаты!' : '🎤 麦克风录音已启动！');
-      } else {
-        if (mediaRecorderRef.current.state === 'paused') {
-          mediaRecorderRef.current.resume();
-          showToast(lang === 'ru' ? '🎤 Запись звука возобновлена' : lang === 'by' ? '🎤 Запіс гуку адноўлены' : '🎤 录音已恢复');
-        }
+      } else if (recorderStatus === 'paused') {
+        await resumeRecording();
+        setTimerActive(true);
+        showToast(lang === 'ru' ? '🎤 Запись звука возобновлена' : lang === 'by' ? '🎤 Запіс гуку адноўлены' : '🎤 录音已恢复');
       }
     } catch (err: any) {
       console.warn('Microphone access or MediaRecorder error:', err);
-      setIsRecordingSupported(false);
-      showToast(lang === 'ru' ? '⚠️ Секундомер запущен без аудио (микрофон недоступен)' : lang === 'by' ? '⚠️ Секундамер запушчаны без аўдыя (мікрафон недаступны)' : '⚠️ 仅启动秒表（无麦克风权限）');
+      showToast(lang === 'ru' ? '⚠️ Ошибка доступа к микрофону' : lang === 'by' ? '⚠️ Памылка доступу да мікрафона' : '⚠️ 麦克风访问失败');
     }
   };
 
-  const pauseAudioRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.pause();
+  const pauseAudioRecording = async () => {
+    if (recorderStatus === 'recording') {
+      await pauseRecording();
+      setTimerActive(false);
     }
   };
 
-  const stopAudioRecording = () => {
-    if (mediaRecorderRef.current && (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused')) {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch (e) {
-        console.warn('Error during mediaRecorder.stop():', e);
-      }
-      if (streamRef.current) {
-        try {
-          streamRef.current.getTracks().forEach(track => track.stop());
-        } catch (e) {
-          console.warn('Error during stream track stop:', e);
-        }
-        streamRef.current = null;
-      }
-      mediaRecorderRef.current = null;
+  const stopAudioRecording = async () => {
+    if (recorderStatus === 'recording' || recorderStatus === 'paused') {
+      await stopRecording();
+      setTimerActive(false);
     }
   };
 
   const triggerAudioFileDownload = (blobToDownload: Blob | null) => {
-    const finalBlob = blobToDownload || audioBlob || (audioChunksRef.current.length > 0 ? new Blob(audioChunksRef.current, { type: 'audio/mpeg' }) : null);
+    const finalBlob = blobToDownload || audioBlob;
     if (!finalBlob) {
       showToast(lang === 'ru' 
         ? '⚠️ Вы еще не включали запись или она пуста' 
@@ -746,9 +660,9 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
         .replace(/\s+/g, '_');
     };
 
-    const safeInformant = cleanForFilename(sessionInformant) || 'И-01';
-    const safeLocation = cleanForFilename(sessionLocation) || 'Поречье';
-    const safeResearcher = cleanForFilename(sessionResearcher) || 'Слобожанин';
+    const safeInformant = cleanForFilename(sessionInformant) || 'Информант';
+    const safeLocation = cleanForFilename(sessionLocation) || 'Локация';
+    const safeResearcher = cleanForFilename(sessionResearcher) || 'Исследователь';
     const safeDate = cleanForFilename(sessionDate) || '2026';
 
     const filename = `Полевые записи/Полевая_аудиозапись_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.mp3`;
@@ -773,37 +687,16 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     }
   };
 
-  const downloadAudioRecording = () => {
-    // If recording is running or active, stop it first to build the final blob
-    if (mediaRecorderRef.current && (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused')) {
-      mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/mpeg' });
-        setAudioBlob(blob);
-        const url = URL.createObjectURL(blob);
-        setAudioUrl(url);
-        triggerAudioFileDownload(blob);
-      };
-      
-      try {
-        mediaRecorderRef.current.stop();
-      } catch (e) {
-        console.warn(e);
-      }
-      
-      if (streamRef.current) {
-        try {
-          streamRef.current.getTracks().forEach(track => track.stop());
-        } catch (e) {
-          console.warn(e);
-        }
-        streamRef.current = null;
-      }
-      mediaRecorderRef.current = null;
+  const downloadAudioRecording = async () => {
+    let blobToDownload = audioBlob;
+    if (recorderStatus === 'recording' || recorderStatus === 'paused') {
+      blobToDownload = await stopRecording();
       setTimerActive(false);
-      return;
     }
-
-    triggerAudioFileDownload(null);
+    if (!blobToDownload && currentSession) {
+      blobToDownload = await exportSessionBlob(currentSession.id);
+    }
+    triggerAudioFileDownload(blobToDownload);
   };
 
   // Start the device's camera stream for live photofixation
@@ -1171,9 +1064,9 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
           .replace(/\s+/g, '_');
       };
 
-      const safeInformant = cleanForFilename(sessionInformant) || 'И-01';
-      const safeLocation = cleanForFilename(sessionLocation) || 'Поречье';
-      const safeResearcher = cleanForFilename(sessionResearcher) || 'Слобожанин';
+      const safeInformant = cleanForFilename(sessionInformant) || 'Информант';
+      const safeLocation = cleanForFilename(sessionLocation) || 'Локация';
+      const safeResearcher = cleanForFilename(sessionResearcher) || 'Исследователь';
       const safeDate = cleanForFilename(sessionDate) || '2026';
 
       const filename = `Полевые записи/Полевые_записи_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.docx`;
@@ -1202,8 +1095,11 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   };
 
   // Save current report to the unified internal Field Diary
-  const saveSessionToFieldDiary = () => {
+  const saveSessionToFieldDiary = async () => {
     // Stop recording when saving to diary
+    if (recorderStatus === 'recording') {
+      await pauseRecording();
+    }
     setTimerActive(false);
 
     const asked = flatQuestions.filter(q => questionStatuses[q.id] === 'asked').length;
@@ -1241,11 +1137,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
       md += `\n`;
     });
 
-    const saved = localStorage.getItem('field_diary');
-    let entries = [];
-    if (saved) {
-      try { entries = JSON.parse(saved); } catch (e) { console.error(e); }
-    }
+    const entries = (await getKV<any[]>('field_diary')) || [];
 
     const newDocument = {
       id: `diary-session-report-${Date.now()}`,
@@ -1255,8 +1147,8 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
       notes: md
     };
 
-    entries = [newDocument, ...entries];
-    localStorage.setItem('field_diary', JSON.stringify(entries));
+    const updated = [newDocument, ...entries];
+    await setKV('field_diary', updated);
 
     showToast(lang === 'ru' 
       ? 'Отчет сессии успешно зафиксирован в Хронике Дневника на Дашборде!' 
@@ -1271,7 +1163,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   };
 
   // Erase responses state, timer, notes, and timecodes for a clean new interview session
-  const handleResetSessionData = () => {
+  const handleResetSessionData = async () => {
     if (confirm(lt.confirmReset)) {
       // 1. Reset component state values
       setQuestionStatuses({});
@@ -1283,19 +1175,8 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
       setCulturalPhotos([]);
 
       // 2. Discard and clean active/recorded audio streams
-      stopAudioRecording();
-      setAudioBlob(null);
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-        setAudioUrl(null);
-      }
-      audioChunksRef.current = [];
-
-      // 3. Clear localStorage immediately to prevent sync lag or stale reload cached values
-      localStorage.setItem('field_session_statuses', '{}');
-      localStorage.setItem('field_session_notes', '{}');
-      localStorage.setItem('field_session_marked_times', '{}');
-      localStorage.setItem('field_cultural_photos', '[]');
+      await stopRecording();
+      await cleanupAudio();
 
       showToast(lang === 'ru' 
         ? 'Все примечания, таймкоды, маркировки и аудиозаписи полностью очищены для начала нового интервью!' 
@@ -1374,6 +1255,57 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
         /* ======================== NEW FIELD MODE (MAIN) ======================== */
         <div className="space-y-8 animate-fade-in">
           
+          {/* Unfinished Sessions Recovery Card */}
+          {unfinishedSessions.length > 0 && (
+            <div className="bg-amber-50/90 border-2 border-amber-300 rounded-2xl p-5 shadow-xs space-y-3">
+              <div className="flex items-center gap-2 text-amber-900 font-bold">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                <span className="text-sm font-sans uppercase tracking-wider">
+                  {lang === 'ru' ? `Обнаружена незавершенная аудиозапись (${unfinishedSessions.length})` : lang === 'by' ? `Знойдзены незакончаны аўдыязапіс (${unfinishedSessions.length})` : `Unfinished Recording Session (${unfinishedSessions.length})`}
+                </span>
+              </div>
+              <p className="text-xs text-amber-800 leading-relaxed font-sans">
+                {lang === 'ru' 
+                  ? 'Предыдущая сессия записи была прервана или вкладка была закрыта. Вы можете восстановить аудиозапись из локальной базы IndexedDB и выгрузить её.'
+                  : lang === 'by'
+                  ? 'Папярэдняя сесія запісу была перапынена або ўкладка была закрыта. Вы можаце аднавіць аўдыязапіс з IndexedDB і спампаваць яго.'
+                  : 'A previous recording was interrupted or the tab was closed. You can recover the audio from IndexedDB.'}
+              </p>
+              <div className="space-y-2">
+                {unfinishedSessions.map((s) => (
+                  <div key={s.id} className="bg-white p-3 rounded-xl border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="text-xs">
+                      <span className="font-bold text-sahara-primary">{s.informant || 'Без шифра'}</span>
+                      <span className="text-sahara-secondary ml-2 font-mono">({new Date(s.createdAt).toLocaleString()})</span>
+                      <span className="text-sahara-secondary/70 ml-2">Сегментов: {s.segments.length}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const b = await recoverSession(s);
+                          if (b) {
+                            showToast(lang === 'ru' ? 'Аудиозапись успешно восстановлена! Нажмите «Выгрузить MP3» для сохранения.' : 'Аўдыязапіс паспяхова адноўлены!');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider cursor-pointer"
+                      >
+                        {lang === 'ru' ? 'Восстановить' : lang === 'by' ? 'Аднавіць' : 'Recover'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => discardUnfinishedSession(s.id)}
+                        className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded-lg text-xs font-bold uppercase tracking-wider cursor-pointer"
+                      >
+                        {lang === 'ru' ? 'Удалить' : lang === 'by' ? 'Выдаліць' : 'Discard'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Session Passport Block */}
           <div className="gsap-q-header bg-[#faf8f5] border-2 border-[#e9e3d5] rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs relative overflow-hidden">
             <div className="absolute top-0 left-0 w-2.5 h-full bg-[#B66029]" />
@@ -1393,6 +1325,29 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                 </span>
               </div>
             </div>
+
+            {/* Recorder Alert Notice */}
+            {recorderAlert && (
+              <div className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs font-sans font-semibold ${
+                recorderAlert.type === 'error'
+                  ? 'bg-red-50 border-red-300 text-red-900'
+                  : 'bg-amber-50 border-amber-300 text-amber-900'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{recorderAlert.text}</span>
+                </div>
+                {requiresUserGesture && (
+                  <button
+                    type="button"
+                    onClick={resumeWithUserGesture}
+                    className="px-3 py-1.5 bg-[#B66029] hover:bg-[#86400f] text-white rounded-lg text-xs font-bold uppercase tracking-wider shrink-0 cursor-pointer shadow-xs"
+                  >
+                    {lang === 'ru' ? 'Возобновить запись' : lang === 'by' ? 'Узнавіць запіс' : 'Resume Recording'}
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Credential Attributes Mapping Inputs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -1455,7 +1410,22 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                 <Clock className="w-5 h-5 text-[#B66029] shrink-0" />
                 <div className="text-center sm:text-left">
                   <span className="block text-[10px] font-sans font-bold uppercase tracking-wider text-[#B66029]/70">{lt.timeElapsed}</span>
-                  <span className="font-mono text-xl sm:text-2xl font-black text-sahara-primary">{formatTime(secondsElapsed)}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-xl sm:text-2xl font-black text-sahara-primary">{formatTime(secondsElapsed)}</span>
+                    {recorderStatus === 'recording' && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-sahara-clay/15 rounded-md border border-[#B66029]/20" title="Уровень звука микрофона">
+                        <div className="w-14 h-2 bg-stone-200 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-75 ${audioLevel < 0.01 ? 'bg-amber-500' : 'bg-emerald-600'}`}
+                            style={{ width: `${Math.min(100, Math.max(6, audioLevel * 300))}%` }}
+                          />
+                        </div>
+                        <span className="text-[9px] font-mono font-bold text-[#B66029]">
+                          {audioLevel < 0.01 ? 'Тишина' : 'REC'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1498,11 +1468,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                       setSecondsElapsed(0);
                       setTimerActive(false);
                       stopAudioRecording();
-                      setAudioBlob(null);
-                      if (audioUrl) {
-                        URL.revokeObjectURL(audioUrl);
-                        setAudioUrl(null);
-                      }
+                      cleanupAudio();
                       showToast(lang === 'ru' ? 'Секундомер и аудиозапись очищены' : 'Секундамер і аўдыязапіс ачышчаны');
                     }
                   }}

@@ -8,6 +8,7 @@ import { BookOpen, ChevronRight, Save, Trash2 } from 'lucide-react';
 import { Questionnaire } from '../types';
 import { Language, translations } from '../lib/translations';
 import { gsap } from 'gsap';
+import { usePersistentState } from '../lib/storage/usePersistentState';
 
 interface DashboardProps {
   questionnaire: Questionnaire;
@@ -26,7 +27,8 @@ interface FieldDiaryEntry {
 }
 
 export default function Dashboard({ questionnaire, loadPreset, resetToClean, setActiveTab, lang }: DashboardProps) {
-  const [diaryEntries, setDiaryEntries] = useState<FieldDiaryEntry[]>([]);
+  const [diaryEntries, setDiaryEntries] = usePersistentState<FieldDiaryEntry[]>('field_diary', []);
+  const [historyFacet] = usePersistentState<any[]>('linguistic_history_facet', []);
   const [newEntry, setNewEntry] = useState({ informantName: '', location: '', notes: '' });
   const [completedTranscriptions, setCompletedTranscriptions] = useState(2);
   const [annotatedTranscriptions, setAnnotatedTranscriptions] = useState(2);
@@ -35,34 +37,17 @@ export default function Dashboard({ questionnaire, loadPreset, resetToClean, set
   const t = translations[lang];
 
   useEffect(() => {
-    const saved = localStorage.getItem('field_diary');
-    if (saved) {
-      try {
-        setDiaryEntries(JSON.parse(saved));
-      } catch (e) {
-        console.error('Error parsing field diary', e);
-      }
+    if (Array.isArray(historyFacet) && historyFacet.length > 0) {
+      setCompletedTranscriptions(historyFacet.length);
+      const annotated = historyFacet.filter((item: any) => {
+        const hasSpans = Array.isArray(item.spans) && item.spans.length > 0;
+        const hasTurnFacets = item.turnFacets && Object.keys(item.turnFacets).length > 0;
+        const hasSegmentTags = Array.isArray(item.segments) && item.segments.some((seg: any) => Array.isArray(seg.tags) && seg.tags.length > 0);
+        return hasSpans || hasTurnFacets || hasSegmentTags;
+      });
+      setAnnotatedTranscriptions(annotated.length);
     }
-
-    const savedHistory = localStorage.getItem('linguistic_history_facet');
-    if (savedHistory) {
-      try {
-        const parsed = JSON.parse(savedHistory);
-        if (Array.isArray(parsed)) {
-          setCompletedTranscriptions(parsed.length);
-          const annotated = parsed.filter((item: any) => {
-            const hasSpans = Array.isArray(item.spans) && item.spans.length > 0;
-            const hasTurnFacets = item.turnFacets && Object.keys(item.turnFacets).length > 0;
-            const hasSegmentTags = Array.isArray(item.segments) && item.segments.some((seg: any) => Array.isArray(seg.tags) && seg.tags.length > 0);
-            return hasSpans || hasTurnFacets || hasSegmentTags;
-          });
-          setAnnotatedTranscriptions(annotated.length);
-        }
-      } catch (e) {
-        console.error('Error parsing linguistic history', e);
-      }
-    }
-  }, []);
+  }, [historyFacet]);
 
   useEffect(() => {
     // GSAP context orchestration
@@ -97,7 +82,6 @@ export default function Dashboard({ questionnaire, loadPreset, resetToClean, set
 
     const updated = [entry, ...diaryEntries];
     setDiaryEntries(updated);
-    localStorage.setItem('field_diary', JSON.stringify(updated));
     setNewEntry({ informantName: '', location: '', notes: '' });
 
     // Instantly animate the newly pushed diary card
@@ -122,13 +106,11 @@ export default function Dashboard({ questionnaire, loadPreset, resetToClean, set
         onComplete: () => {
           const updated = diaryEntries.filter(e => e.id !== id);
           setDiaryEntries(updated);
-          localStorage.setItem('field_diary', JSON.stringify(updated));
         }
       });
     } else {
       const updated = diaryEntries.filter(e => e.id !== id);
       setDiaryEntries(updated);
-      localStorage.setItem('field_diary', JSON.stringify(updated));
     }
   };
 

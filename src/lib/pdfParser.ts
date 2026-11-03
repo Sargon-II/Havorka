@@ -5,12 +5,11 @@
 
 // @ts-ignore - pdfjs-dist has complex types but works perfectly in browser
 import * as pdfjsLib from 'pdfjs-dist';
+// @ts-ignore - Vite ?url worker import
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-// Dynamic helper version from the imported library
-const pdfjsVersion = pdfjsLib.version || '4.0.379'; 
-
-// Use the official CDN for the worker to avoid packing issues and enable zero-install offline worker caching
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsVersion}/pdf.worker.min.mjs`;
+// Use local Vite-bundled worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 /**
  * Parses text from a PDF file directly in the browser.

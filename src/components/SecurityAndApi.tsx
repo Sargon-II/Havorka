@@ -4,13 +4,15 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Key, ShieldAlert, ShieldCheck, ExternalLink, Copy, Check, Terminal, PlayCircle, Loader2, AlertCircle, Bot, Cpu, Sparkles, FileAudio, Trash2, UploadCloud, Volume2, RefreshCw } from 'lucide-react';
+import { Key, ShieldAlert, ShieldCheck, ExternalLink, Copy, Check, Terminal, PlayCircle, Loader2, AlertCircle, Bot, Cpu, Sparkles, FileAudio, Trash2, UploadCloud, Volume2, RefreshCw, Database, HardDrive } from 'lucide-react';
 import { PromptPack, ModelGuide } from '../types';
 import { DEFAULT_PROMPT_PACKS, DEFAULT_MODEL_GUIDES } from '../data/defaultData';
 import { Language } from '../lib/translations';
 import { decodeGeminiError, DecodedError } from '../lib/errorDecoder';
 import { getApiKey, setApiKey, clearApiKey } from '../lib/apiKey';
 import { generateText } from '../lib/gemini';
+import { usePersistentState } from '../lib/storage/usePersistentState';
+import { getStoragePersistenceStatus, requestStoragePersistence, StoragePersistenceStatus } from '../lib/storage/persistence';
 
 interface SecurityAndApiProps {
   lang: Language;
@@ -28,7 +30,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
   
   // Prompt selection and sandbox
   const [selectedPromptId, setSelectedPromptId] = useState(DEFAULT_PROMPT_PACKS[0].id);
-  const [customPrompts, setCustomPrompts] = useState<PromptPack[]>([]);
+  const [customPrompts, setCustomPrompts] = usePersistentState<PromptPack[]>('custom_prompt_packs', []);
   const [isCustomPromptOpen, setIsCustomPromptOpen] = useState(false);
   const [newPromptTitle, setNewPromptTitle] = useState('');
   const [newPromptText, setNewPromptText] = useState('');
@@ -40,6 +42,10 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
   const [errorMessage, setErrorMessage] = useState('');
   const [audioFile, setAudioFile] = useState<{ data: string; name: string; size: number; mimeType: string } | null>(null);
   const [audioError, setAudioError] = useState<string>('');
+
+  // Storage persistence status
+  const [persistenceStatus, setPersistenceStatus] = useState<StoragePersistenceStatus>({ supported: false, persisted: false });
+  const [isRequestingPersist, setIsRequestingPersist] = useState(false);
 
   // Guide selection states (relocated to 4th tab)
   const [selectedGuideId, setSelectedGuideId] = useState<string>(DEFAULT_MODEL_GUIDES[0].id);
@@ -175,7 +181,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
     }
   };
 
-  // Load API Key and Custom Prompts from localStorage on mount
+  // Load API Key and Storage Persistence status on mount
   useEffect(() => {
     const savedKey = getApiKey();
     if (savedKey) {
@@ -183,15 +189,16 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
       verifyApiKeyCheck(savedKey);
     }
 
-    const savedCustom = localStorage.getItem('custom_prompt_packs');
-    if (savedCustom) {
-      try {
-        setCustomPrompts(JSON.parse(savedCustom));
-      } catch (e) {
-        console.error('Failed to parse custom prompts', e);
-      }
-    }
+    getStoragePersistenceStatus().then(setPersistenceStatus);
   }, []);
+
+  const handleRequestPersist = async () => {
+    setIsRequestingPersist(true);
+    await requestStoragePersistence();
+    const updated = await getStoragePersistenceStatus();
+    setPersistenceStatus(updated);
+    setIsRequestingPersist(false);
+  };
 
   const handleSaveKey = async () => {
     const trimmed = userApiKey.trim();
@@ -238,7 +245,6 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
     };
     const updated = [...customPrompts, newPack];
     setCustomPrompts(updated);
-    localStorage.setItem('custom_prompt_packs', JSON.stringify(updated));
     setSelectedPromptId(newId);
     setNewPromptTitle('');
     setNewPromptText('');
@@ -248,7 +254,6 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
   const handleDeleteCustomPrompt = (idToDelete: string) => {
     const updated = customPrompts.filter(p => p.id !== idToDelete);
     setCustomPrompts(updated);
-    localStorage.setItem('custom_prompt_packs', JSON.stringify(updated));
     if (selectedPromptId === idToDelete) {
       setSelectedPromptId(DEFAULT_PROMPT_PACKS[0].id);
     }
@@ -342,7 +347,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
       title: 'Расшифровка & Интеграция API',
       subtitle: 'Управление личными ключами доступа, меню выбора системных промптов и офлайн-рекомендации по защите информантов.',
       keySectionTitle: 'Использование личного Gemini API ключа в программе',
-      keyDesc: 'По умолчанию приложение использует центральный ключ разработчика (если задан) или работает локально. Чтобы гарантировать независимые запросы и нулевое логирование, вы можете указать собственный ключ. Он хранится исключительно в локальном хранилище (localStorage) вашего браузера и никогда не передается на сторонние сервера, кроме официального проксирования в Google Gemini API.',
+      keyDesc: 'Приложение работает полностью на стороне клиента. Ключ API хранится исключительно в локальном хранилище (localStorage) вашего браузера и никогда не передается на сторонние серверы, а запросы отправляются напрямую в Google Gemini API.',
       keyPlaceholder: 'Введите ваш ключ API (AIzaSy...)',
       btnSave: 'Сохранить ключ в браузере',
       btnClear: 'Очистить ключ',
@@ -386,7 +391,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
       title: 'Бяспека даных & Інтэграцыя API',
       subtitle: 'Кіраванне асабістымі ключамі доступу, меню выбару сістэмных промптаў і афлайн-рэкамендацыі па абароне інфармантаў.',
       keySectionTitle: 'Выкарыстанне асабістага Gemini API ключа ў праграме',
-      keyDesc: 'Па змаўчанні дадатак выкарыстоўвае цэнтральны ключ распрацоўшчыка (калі ён зададзены) ці працуе лакальна. Каб гарантаваць незалежныя запыты і нулявое лагаванне, вы можаце паказаць уласны ключ. Ён захоўваецца выключна ў лакальным сховішчы (localStorage) вашага браўзера і ніколі не перадаецца на староннія серверы, акрамя афіцыйнага проксіравання ў Google Gemini API.',
+      keyDesc: 'Дадатак працуе цалкам на баку кліента. Ключ API захоўваецца выключна ў лакальным сховішчы (localStorage) вашага браўзера і ніколі не перадаецца на староннія серверы, а запыты накіроўваюцца наўпрост у Google Gemini API.',
       keyPlaceholder: 'Увядзіце ваш ключ API (AIzaSy...)',
       btnSave: 'Захаваць ключ у браўзеры',
       btnClear: 'Ачысціць ключ',
@@ -430,7 +435,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
       title: '数据安全与 API 集成',
       subtitle: '管理您的个人 API 访问密钥，调用系统提示词，并参阅本地离线部署建议以保障受访者的数据隐私。',
       keySectionTitle: '在程序中配置个人 Gemini API 密钥',
-      keyDesc: '默认情况下，应用程序会使用开发者预设的云端密钥运行（如果有），或者支持完全的本地处理。为确保完全的研究独立性、无配额限制和绝对的数据隐私，极力推荐您配置专属的 API 密钥。该密钥仅存储在您本地浏览器缓存（localStorage）中，除直接向 Google Gemini 官方端点发起代理请求外，绝不会泄漏或上传给任何第三方。',
+      keyDesc: '本应用完全在客户端运行。您的 API 密钥仅存储在当前设备的本地浏览器缓存（localStorage）中，绝不上传至任何第三方服务器，所有请求均直接加密发送至 Google Gemini API 官方端点。',
       keyPlaceholder: '请输入您的 API 密钥 (开头为 AIzaSy...)',
       btnSave: '保存在本地浏览器中',
       btnClear: '清除密钥',
@@ -628,7 +633,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
               ) : (
                 <>
                   <ShieldAlert className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span>{lang === 'ru' ? 'Консоль использует центральный/облачный ключ по умолчанию' : lang === 'by' ? 'Кансоль выкарыстоўвае цэнтральны/воблачны ключ па змаўчанні' : '控制台正在使用云端默认密钥'}</span>
+                  <span>{lang === 'ru' ? 'API-ключ не задан (требуется для онлайн-запросов)' : lang === 'by' ? 'API-ключ не зададзены (патрэбны для анлайн-запытаў)' : '未配置 API 密钥（在线请求需要配置密钥）'}</span>
                 </>
               )}
             </div>
@@ -1020,10 +1025,10 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
                           ) : (
                             <>
                               <p className="font-extrabold text-sahara-primary">
-                                {lang === 'ru' ? 'Используется защищенный серверный ключ по умолчанию' : lang === 'by' ? 'Выкарыстоўваецца абаронены серверны ключ па змаўчанні' : '正在使用系统内置服务器专用凭证'}
+                                {lang === 'ru' ? 'Персональный API-ключ не настроен' : lang === 'by' ? 'Асабісты API-ключ не наладжаны' : '尚未配置个人 API 密钥'}
                               </p>
                               <p className="text-sahara-secondary/80 text-[11px]">
-                                {lang === 'ru' ? 'Интеллектуальный процессинг работает через наш центральный провайдер Gemini. Вы можете ввести собственный ключ выше для полной автономности.' : lang === 'by' ? 'Інтэлектуальны працэсінг працуе праз наш цэнтральны правайдэр Gemini. Вы можаце ўвесці асобны ключ уверсе.' : '系统正通过后端代理直联公共 Gemini 大模型通道。如果您对数据拥有极高安全要求，请输入个人专有密钥进行单机离线隔离。'}
+                                {lang === 'ru' ? 'Ключ хранится только на вашем устройстве, а запросы отправляются напрямую в Google Gemini API. Введите ваш ключ выше для работы онлайн-модулей.' : lang === 'by' ? 'Ключ захоўваецца толькі на вашай прыладзе, а запыты накіроўваюцца наўпрост у Google Gemini API. Увядзіце ваш ключ уверсе для працы анлайн-модуляў.' : '密钥仅保存在当前设备本地，请求直接加密发送至 Google Gemini API。请在上方输入您的密钥以激活在线功能。'}
                               </p>
                             </>
                           )}
@@ -1041,6 +1046,84 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
                     </div>
                   )}
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* Section: Storage Persistence & Offline Resilience */}
+          <div className="bg-white border border-sahara-surface-dim/40 rounded-xl p-6 md:p-8 space-y-5 shadow-xs">
+            <div className="flex items-center justify-between border-b border-sahara-surface-dim/30 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-md bg-green-100/20 text-sahara-primary">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-serif font-black text-sahara-primary">
+                    {lang === 'ru' ? 'Постоянное хранилище IndexedDB' : lang === 'by' ? 'Пастаяннае сховішча IndexedDB' : 'IndexedDB 本地持久化存储'}
+                  </h3>
+                  <p className="text-xs text-sahara-secondary">
+                    {lang === 'ru' ? 'Автономное хранение интервью, полевого дневника и потоковых аудиочанков' : lang === 'by' ? 'Аўтаномнае захаванне інтэрв\'ю, палявога дзённіка і струменевых аўдыячанкаў' : '完全离线化存储采访记录、田野日记及流式音频片段'}
+                  </p>
+                </div>
+              </div>
+              <div className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 ${
+                persistenceStatus.persisted
+                  ? 'bg-green-50 text-green-700 border border-green-200'
+                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+              }`}>
+                {persistenceStatus.persisted ? (
+                  <>
+                    <ShieldCheck className="w-3.5 h-3.5 text-green-600" />
+                    <span>{lang === 'ru' ? 'Защищено от очистки' : lang === 'by' ? 'Абаронена ад ачысткі' : '持久化保护已开启'}</span>
+                  </>
+                ) : (
+                  <>
+                    <HardDrive className="w-3.5 h-3.5 text-amber-600" />
+                    <span>{lang === 'ru' ? 'Стандартное хранилище' : lang === 'by' ? 'Стандартнае сховішча' : '标准存储模式'}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-sahara-background/60 border border-sahara-surface-dim/40 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs font-sans">
+              <div className="space-y-1">
+                <p className="text-sahara-onbackground font-medium">
+                  {persistenceStatus.persisted
+                    ? (lang === 'ru'
+                        ? 'Браузер гарантирует постоянное хранение данных даже при нехватке свободного места на диске.'
+                        : lang === 'by'
+                        ? 'Браўзер гарантуе пастаяннае захаванне даных нават пры недахопе вольнага месца на дыску.'
+                        : '浏览器已为本应用授予持久化配额，即便在系统低磁盘空间状态下亦不会被自动清除。')
+                    : (lang === 'ru'
+                        ? 'Хранилище работает в стандартном режиме. Для защиты записей от очистки браузером нажмите кнопку справа.'
+                        : lang === 'by'
+                        ? 'Сховішча працуе ў стандартным рэжыме. Каб абараніць запісы ад ачысткі браўзерам, націсніце кнопку справа.'
+                        : '当前运行于默认存储池中。为防止浏览器在存储紧张时清理缓存，建议申请永久保护。')}
+                </p>
+                {persistenceStatus.quota && (
+                  <p className="text-sahara-secondary text-[11px]">
+                    {lang === 'ru' ? 'Использовано диска: ' : lang === 'by' ? 'Выкарыстана дыска: ' : '已占用存储: '}
+                    <span className="font-semibold text-sahara-onbackground font-mono">
+                      {((persistenceStatus.usage || 0) / (1024 * 1024)).toFixed(1)} МБ
+                    </span>
+                    {' / '}
+                    <span className="text-sahara-secondary font-mono">
+                      {((persistenceStatus.quota || 0) / (1024 * 1024)).toFixed(0)} МБ
+                    </span>
+                  </p>
+                )}
+              </div>
+
+              {!persistenceStatus.persisted && (
+                <button
+                  type="button"
+                  onClick={handleRequestPersist}
+                  disabled={isRequestingPersist}
+                  className="px-4 py-2 bg-sahara-primary hover:bg-sahara-primary/90 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0 flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>{isRequestingPersist ? '...' : (lang === 'ru' ? 'Запросить защиту (persist)' : lang === 'by' ? 'Запытаць абарону (persist)' : '申请持久化 (persist)')}</span>
+                </button>
               )}
             </div>
           </div>

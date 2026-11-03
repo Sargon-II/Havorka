@@ -17,17 +17,15 @@ import { Language, translations } from './lib/translations';
 import { gsap } from 'gsap';
 import { ApiKeyGate } from './components/ApiKeyGate';
 
+import { usePersistentState } from './lib/storage/usePersistentState';
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [lang, setLang] = useState<Language>(() => {
-    return (localStorage.getItem('app_lang') as Language) || 'ru';
-  });
-  const [questionnaire, setQuestionnaire] = useState<Questionnaire>(DEFAULT_QUESTIONNAIRE);
-  const [researcherName, setResearcherName] = useState<string>(() => {
-    return localStorage.getItem('researcher_name') || 'Введите ФИО';
-  });
-  const [fontSize, setFontSize] = useState<string>(() => localStorage.getItem('app_font_size') || 'base');
-  const [fontWeight, setFontWeight] = useState<string>(() => localStorage.getItem('app_font_weight') || 'normal');
+  const [lang, setLang] = usePersistentState<Language>('app_lang', 'ru');
+  const [questionnaire, setQuestionnaire] = usePersistentState<Questionnaire>('sociologist_questionnaire', DEFAULT_QUESTIONNAIRE);
+  const [researcherName, setResearcherName] = usePersistentState<string>('researcher_name', 'Введите ФИО');
+  const [fontSize, setFontSize] = usePersistentState<string>('app_font_size', 'base');
+  const [fontWeight, setFontWeight] = usePersistentState<string>('app_font_weight', 'normal');
   const [showFontMenu, setShowFontMenu] = useState(false);
   const fontMenuRef = useRef<HTMLDivElement>(null);
 
@@ -42,13 +40,7 @@ export default function App() {
       xl: '20px',
     };
     document.documentElement.style.fontSize = sizeMap[fontSize] || '16px';
-    localStorage.setItem('app_font_size', fontSize);
   }, [fontSize]);
-
-  // Sync font weight
-  useEffect(() => {
-    localStorage.setItem('app_font_weight', fontWeight);
-  }, [fontWeight]);
 
   // Close font settings menu when clicking outside
   useEffect(() => {
@@ -60,27 +52,6 @@ export default function App() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  // Sync language selection
-  useEffect(() => {
-    localStorage.setItem('app_lang', lang);
-  }, [lang]);
-
-  // Load preserved data
-  useEffect(() => {
-    const saved = localStorage.getItem('sociologist_questionnaire');
-    if (saved) {
-      try {
-        setQuestionnaire(JSON.parse(saved));
-      } catch (e) {
-        console.error('Error loading questionnaire from storage', e);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('researcher_name', researcherName);
-  }, [researcherName]);
 
   // GSAP transition on tab switch
   useEffect(() => {
@@ -105,7 +76,6 @@ export default function App() {
 
     if (window.confirm(confirmMsg)) {
       setQuestionnaire(DEFAULT_QUESTIONNAIRE);
-      localStorage.setItem('sociologist_questionnaire', JSON.stringify(DEFAULT_QUESTIONNAIRE));
     }
   };
 
@@ -132,7 +102,6 @@ export default function App() {
         blocks: []
       };
       setQuestionnaire(cleanQ);
-      localStorage.setItem('sociologist_questionnaire', JSON.stringify(cleanQ));
     }
   };
 

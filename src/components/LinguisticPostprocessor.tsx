@@ -4,6 +4,8 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { usePersistentState } from '../lib/storage/usePersistentState';
+import { getKV } from '../lib/storage/db';
 import { 
   Check, 
   Download, 
@@ -70,21 +72,21 @@ interface LinguisticPostprocessorProps {
 
 export default function LinguisticPostprocessor({ researcherName, onResearcherNameChange, lang }: LinguisticPostprocessorProps) {
   // Traditional segments (turn text containers)
-  const [segments, setSegments] = useState<TranscriptSegment[]>([]);
+  const [segments, setSegments, isSegmentsLoading] = usePersistentState<TranscriptSegment[]>('linguistic_segments_facet', []);
   const [rawText, setRawText] = useState('');
   const [copiedText, setCopiedText] = useState(false);
   
   // Metadata Passport
-  const [metadata, setMetadata] = useState({
+  const [metadata, setMetadata] = usePersistentState('linguistic_meta_facet', {
     researcher: researcherName,
     informantCode: 'В-78 Гродно',
     location: 'г. Гродно, Гродненская область',
   });
 
   // Faceted Annotation States
-  const [turnFacets, setTurnFacets] = useState<Record<string, TurnFacetAnnotation>>({});
-  const [spans, setSpans] = useState<SpanAnnotation[]>([]);
-  const [speakerProfiles, setSpeakerProfiles] = useState<Record<string, SpeakerProfile>>({});
+  const [turnFacets, setTurnFacets] = usePersistentState<Record<string, TurnFacetAnnotation>>('linguistic_facets_facet', {});
+  const [spans, setSpans] = usePersistentState<SpanAnnotation[]>('linguistic_spans_facet', []);
+  const [speakerProfiles, setSpeakerProfiles] = usePersistentState<Record<string, SpeakerProfile>>('linguistic_speakers_facet', {});
 
   // Active word selection trackers for span tagging (segmentId -> array of selected word indices)
   const [selectedWordIndices, setSelectedWordIndices] = useState<Record<string, number[]>>({});
@@ -104,7 +106,7 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
   const [uploadError, setUploadError] = useState('');
 
   // History memory for past parsed transcripts
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [history, setHistory, isHistoryLoading] = usePersistentState<HistoryItem[]>('linguistic_history_facet', []);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const t = translations[lang];
@@ -201,61 +203,31 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
 
   // Sync researcher name from props
   useEffect(() => {
-    setMetadata(prev => {
-      if (prev.researcher === researcherName) return prev;
-      const next = { ...prev, researcher: researcherName };
-      localStorage.setItem('linguistic_meta_facet', JSON.stringify(next));
-      return next;
-    });
+    if (researcherName) {
+      setMetadata(prev => {
+        if (prev.researcher === researcherName) return prev;
+        return { ...prev, researcher: researcherName };
+      });
+    }
   }, [researcherName]);
 
-  // Load or generate initial state
+  // Initial sample loading if empty after hydration
   useEffect(() => {
-    const savedSegments = localStorage.getItem('linguistic_segments_facet');
-    const savedSpans = localStorage.getItem('linguistic_spans_facet');
-    const savedFacets = localStorage.getItem('linguistic_facets_facet');
-    const savedSpeakers = localStorage.getItem('linguistic_speakers_facet');
-    const savedMeta = localStorage.getItem('linguistic_meta_facet');
-
-    if (savedSegments && savedSpans && savedFacets && savedSpeakers) {
-      try {
-        setSegments(JSON.parse(savedSegments));
-        setSpans(JSON.parse(savedSpans));
-        setTurnFacets(JSON.parse(savedFacets));
-        setSpeakerProfiles(JSON.parse(savedSpeakers));
-        if (savedMeta) {
-          const parsedMeta = JSON.parse(savedMeta);
-          setMetadata({
-            ...parsedMeta,
-            researcher: researcherName || parsedMeta.researcher
-          });
-        }
-      } catch (e) {
-        console.error('Failed to parse saved state, loading Grodno defaults', e);
-        loadGrodnoSample();
-      }
-    } else {
+    if (!isSegmentsLoading && segments.length === 0) {
       loadGrodnoSample();
     }
-  }, []);
+  }, [isSegmentsLoading, segments.length]);
 
   // Loaded or generate initial history state
   useEffect(() => {
-    const savedHistory = localStorage.getItem('linguistic_history_facet');
-    if (savedHistory) {
-      try {
-        setHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        console.error('Failed to parse saved history, loading seed defaults', e);
-      }
-    } else {
+    if (!isHistoryLoading && history.length === 0) {
       const seedHistory: HistoryItem[] = [
         {
           id: 'hist-seed-1',
           timestamp: '17.06.2026, 12:40',
           metadata: {
             informantCode: 'М-82 Поставы',
-            researcher: researcherName || 'Слобожанин М.М.',
+            researcher: researcherName || 'Исследователь',
             location: 'г. Поставы, Витебская область'
           },
           segments: [
@@ -279,7 +251,7 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
           timestamp: '15.06.2026, 16:15',
           metadata: {
             informantCode: 'К-44 Кличев',
-            researcher: researcherName || 'Слобожанин М.М.',
+            researcher: researcherName || 'Исследователь',
             location: 'д. Дмитриевка, Кличевский р-н'
           },
           segments: [
@@ -298,9 +270,8 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
         }
       ];
       setHistory(seedHistory);
-      localStorage.setItem('linguistic_history_facet', JSON.stringify(seedHistory));
     }
-  }, [researcherName]);
+  }, [isHistoryLoading, history.length, researcherName]);
 
   const saveCurrentToHistory = () => {
     if (segments.length === 0) return;
@@ -317,7 +288,6 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
     
     const updatedHistory = [newItem, ...history];
     setHistory(updatedHistory);
-    localStorage.setItem('linguistic_history_facet', JSON.stringify(updatedHistory));
   };
 
   const loadFromHistory = (item: HistoryItem) => {
@@ -333,19 +303,10 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
     e.stopPropagation();
     const updatedHistory = history.filter(item => item.id !== id);
     setHistory(updatedHistory);
-    localStorage.setItem('linguistic_history_facet', JSON.stringify(updatedHistory));
   };
 
   const exportAllReportsToDocxArchive = async () => {
-    const diarySaved = localStorage.getItem('field_diary');
-    let diaryEntries: any[] = [];
-    if (diarySaved) {
-      try {
-        diaryEntries = JSON.parse(diarySaved);
-      } catch (e) {
-        console.error('Error parsing diary entries:', e);
-      }
-    }
+    const diaryEntries = (await getKV<any[]>('field_diary')) || [];
 
     if (history.length === 0 && diaryEntries.length === 0) {
       alert(lang === 'ru' 
@@ -636,7 +597,7 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
     }
   };
 
-  // Save changes to localStorage
+  // Save changes to persistent state
   const saveState = (
     segs: TranscriptSegment[], 
     sps: SpanAnnotation[], 
@@ -644,11 +605,11 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
     sprofiles: Record<string, SpeakerProfile>,
     metaObj = metadata
   ) => {
-    localStorage.setItem('linguistic_segments_facet', JSON.stringify(segs));
-    localStorage.setItem('linguistic_spans_facet', JSON.stringify(sps));
-    localStorage.setItem('linguistic_facets_facet', JSON.stringify(facs));
-    localStorage.setItem('linguistic_speakers_facet', JSON.stringify(sprofiles));
-    localStorage.setItem('linguistic_meta_facet', JSON.stringify(metaObj));
+    setSegments(segs);
+    setSpans(sps);
+    setTurnFacets(facs);
+    setSpeakerProfiles(sprofiles);
+    setMetadata(metaObj);
   };
 
   // Stagger elements mounting
