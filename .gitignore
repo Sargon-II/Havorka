@@ -1,8 +1,18 @@
 node_modules/
-build/
 dist/
+build/
 coverage/
 .DS_Store
 *.log
-.env*
+.env
+.env.*
 !.env.example
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# Tauri
+src-tauri/target/

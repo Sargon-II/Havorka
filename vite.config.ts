@@ -1,17 +1,43 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import { defineConfig, PluginOption } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig(() => {
+function virtualPwaStubPlugin(): PluginOption {
+  const virtualModuleId = 'virtual:pwa-register';
+  const resolvedVirtualModuleId = '\0' + virtualModuleId;
   return {
-    plugins: [
-      react(), 
-      tailwindcss(),
+    name: 'vite-plugin-virtual-pwa-stub',
+    resolveId(id) {
+      if (id === virtualModuleId) {
+        return resolvedVirtualModuleId;
+      }
+    },
+    load(id) {
+      if (id === resolvedVirtualModuleId) {
+        return 'export function registerSW() { return () => {}; }';
+      }
+    },
+  };
+}
+
+export default defineConfig(() => {
+  const isNative = process.env.BUILD_TARGET === 'native';
+  const base = process.env.VITE_BASE || '/';
+
+  const plugins: PluginOption[] = [
+    react(),
+    tailwindcss(),
+  ];
+
+  if (isNative) {
+    plugins.push(virtualPwaStubPlugin());
+  } else {
+    plugins.push(
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg'],
+        includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
         manifest: {
           name: 'Полевой помощник исследователя',
           short_name: 'Помощник исследователя',
@@ -19,8 +45,8 @@ export default defineConfig(() => {
           theme_color: '#0f172a',
           background_color: '#0f172a',
           display: 'standalone',
-          start_url: '/',
-          scope: '/',
+          start_url: './',
+          scope: './',
           orientation: 'portrait-primary',
           icons: [
             {
@@ -45,6 +71,30 @@ export default defineConfig(() => {
               src: 'icon.svg',
               sizes: '512x512',
               type: 'image/svg+xml',
+              purpose: 'maskable'
+            },
+            {
+              src: 'icon-192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any'
+            },
+            {
+              src: 'icon-192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'maskable'
+            },
+            {
+              src: 'icon-512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any'
+            },
+            {
+              src: 'icon-512.png',
+              sizes: '512x512',
+              type: 'image/png',
               purpose: 'maskable'
             }
           ]
@@ -92,17 +142,19 @@ export default defineConfig(() => {
           ]
         }
       })
-    ],
+    );
+  }
+
+  return {
+    base,
+    plugins,
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };
