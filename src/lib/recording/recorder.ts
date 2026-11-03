@@ -109,10 +109,18 @@ export class RobustAudioRecorder {
       this.recordGapEnd();
       this.requestWakeLock();
 
-      // Check stream health after returning from background
-      if (!this.audioTrack || this.audioTrack.readyState !== 'live' || this.audioTrack.muted) {
-        console.warn('[Recorder] Stream dead or muted after background return, initiating recovery');
-        this.handleInterruption('Вкладка возвращена из фона, микрофон перезапускается...');
+      // Check stream health after returning from background.
+      // Note: In Chrome desktop/mobile, audioTrack.muted can be briefly true during visibility transition,
+      // and unmutes automatically upon regaining focus. Do NOT kill or interrupt if track is still 'live'.
+      if (!this.audioTrack || this.audioTrack.readyState === 'ended') {
+        console.warn('[Recorder] Stream ended after background return, waiting for user gesture');
+        this.status = 'interrupted';
+        this.callbacks.onStatusChange?.('interrupted');
+        this.callbacks.onRequiresUserGesture?.(true);
+        this.callbacks.onAlert?.(
+          'Вкладка была в фоне, захват микрофона приостановлен. Нажмите «Продолжить запись», чтобы возобновить.',
+          'warning'
+        );
       }
     }
   };
@@ -206,6 +214,15 @@ export class RobustAudioRecorder {
 
   private async startNewSegment(): Promise<void> {
     try {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        const isInsecure = typeof window !== 'undefined' && window.isSecureContext === false;
+        const msg = isInsecure
+          ? 'Захват микрофона заблокирован браузером: страница открыта не через защищённое соединение (HTTP с IP). Откройте http://localhost:3000 или настройте HTTPS.'
+          : 'Браузер не поддерживает доступ к микрофону (navigator.mediaDevices.getUserMedia отсутствует).';
+        logEvent('GUM_ERR', isInsecure ? 'INSECURE_CONTEXT' : 'NOT_SUPPORTED');
+        throw new Error(msg);
+      }
+
       try {
         this.stream = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -215,8 +232,13 @@ export class RobustAudioRecorder {
           },
         });
       } catch (gumErr: any) {
-        logEvent('GUM_ERR', gumErr?.name || gumErr?.message || 'denied');
-        throw gumErr;
+        if (gumErr?.name === 'OverconstrainedError' || gumErr?.name === 'ConstraintNotSatisfiedError') {
+          console.warn('[Recorder] Advanced audio constraints failed, trying basic audio: true');
+          this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } else {
+          logEvent('GUM_ERR', gumErr?.name || gumErr?.message || 'denied');
+          throw gumErr;
+        }
       }
 
       this.audioTrack = this.stream.getAudioTracks()[0];
@@ -426,6 +448,25 @@ export class RobustAudioRecorder {
       this.callbacks.onRequiresUserGesture?.(false);
     } catch (err: any) {
       console.error('[Recorder] Failed to start segment:', err);
+      const isDenied =
+        err?.name === 'NotAllowedError' ||
+        err?.name === 'PermissionDeniedError' ||
+        err?.message?.includes('Permission') ||
+        err?.message?.includes('denied') ||
+        err?.message?.includes('заблокирован браузером') ||
+        err?.message?.includes('не поддерживает');
+
+      if (isDenied) {
+        this.status = 'interrupted';
+        this.callbacks.onStatusChange?.('interrupted');
+        this.callbacks.onRequiresUserGesture?.(true);
+        this.callbacks.onAlert?.(
+          err.message || 'Доступ к микрофону не разрешён. Нажмите «Продолжить запись» и подтвердите доступ к микрофону в диалоге браузера (или проверьте значок настроек сайта в строке адреса).',
+          'error'
+        );
+        return;
+      }
+
       this.handleInterruption(err.message || 'Не удалось получить доступ к микрофону');
     }
   }

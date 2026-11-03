@@ -624,6 +624,10 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
         await resumeRecording();
         setTimerActive(true);
         showToast(lang === 'ru' ? '🎤 Запись звука возобновлена' : lang === 'by' ? '🎤 Запіс гуку адноўлены' : '🎤 录音已恢复');
+      } else if (recorderStatus === 'interrupted') {
+        await resumeWithUserGesture();
+        setTimerActive(true);
+        showToast(lang === 'ru' ? '🎤 Запись звука возобновлена' : lang === 'by' ? '🎤 Запіс гуку адноўлены' : '🎤 录音已恢复');
       }
     } catch (err: any) {
       console.warn('Microphone access or MediaRecorder error:', err);
@@ -1404,22 +1408,22 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
 
             {/* Recorder Alert Notice */}
             {recorderAlert && (
-              <div className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs font-sans font-semibold ${
+              <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-sans font-semibold ${
                 recorderAlert.type === 'error'
                   ? 'bg-red-50 border-red-300 text-red-900'
                   : 'bg-amber-50 border-amber-300 text-amber-900'
               }`}>
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{recorderAlert.text}</span>
+                <div className="flex items-start sm:items-center gap-2 flex-1 min-w-0">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 sm:mt-0 text-current" />
+                  <span className="leading-relaxed break-words">{recorderAlert.text}</span>
                 </div>
                 {requiresUserGesture && (
                   <button
                     type="button"
                     onClick={resumeWithUserGesture}
-                    className="px-3 py-1.5 bg-[#B66029] hover:bg-[#86400f] text-white rounded-lg text-xs font-bold uppercase tracking-wider shrink-0 cursor-pointer shadow-xs"
+                    className="px-3.5 py-1.5 bg-[#B66029] hover:bg-[#86400f] text-white rounded-lg text-xs font-bold uppercase tracking-wider shrink-0 cursor-pointer shadow-xs self-start sm:self-auto"
                   >
-                    {lang === 'ru' ? 'Возобновить запись' : lang === 'by' ? 'Узнавіць запіс' : 'Resume Recording'}
+                    {lang === 'ru' ? 'Продолжить запись' : lang === 'by' ? 'Працягнуць запіс' : 'Resume Recording'}
                   </button>
                 )}
               </div>

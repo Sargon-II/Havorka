@@ -35,11 +35,20 @@ body {
   font-size: 0.9375rem; /* Ensure all elements are slightly larger by default and scale from root html */
 }
 
-/* 1. Global text wrapping & word breaking rules */
-p, span, h1, h2, h3, h4, h5, h6, label, button, a, li, dt, dd, blockquote, figcaption, input, textarea {
-  overflow-wrap: anywhere;
+/* 1. Global text wrapping & word breaking rules:
+   Use break-word (NOT anywhere) so intrinsic min-content widths are respected
+   and words NEVER stack in single-character vertical columns on non-fullscreen resize */
+p, span, h1, h2, h3, h4, h5, h6, label, a, li, dt, dd, blockquote, figcaption, input, textarea {
+  overflow-wrap: break-word;
   word-break: normal;
   hyphens: manual;
+}
+
+/* Buttons, tabs, and action badges must always wrap whole words, never breaking mid-letter */
+button, [role="button"], .btn, nav button, nav a {
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+  white-space: normal;
 }
 
 /* Tables: horizontal scroll container, min-width and safe break-word */
@@ -72,11 +81,6 @@ td, th {
 .linguistic-text, .transcript-area, .dialect-form, code, pre, .font-mono, textarea, input, [data-no-hyphens], .no-hyphens {
   hyphens: manual !important;
   -webkit-hyphens: manual !important;
-}
-
-/* Flex & Grid child shrink protection */
-.flex > *, .grid > * {
-  min-width: 0;
 }
 
 /* Protect icons, images, and thumbnail badges from being squished */
