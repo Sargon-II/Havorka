@@ -23,6 +23,7 @@ import { getKV, setKV } from '../lib/storage/db';
 import { useRecorder } from '../lib/recording/useRecorder';
 import { exportSessionBlob } from '../lib/recording/recorder';
 import { saveFile, getAudioExtension } from '../platform/files';
+import { openNativeAppSettings, isCapacitorAndroid } from '../platform/nativeRecording';
 
 interface QuestionnaireBuilderProps {
   questionnaire: Questionnaire;
@@ -241,6 +242,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
   const [photoCategory, setPhotoCategory] = useState<'utensils' | 'buildings' | 'costume' | 'inventory' | 'other'>('utensils');
   const [photoAge, setPhotoAge] = useState('');
   const [photoDescription, setPhotoDescription] = useState('');
+  const [micPermissionDenied, setMicPermissionDenied] = useState(false);
 
   // States for the inline Template Editor modes (no window.prompts!)
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
@@ -625,7 +627,17 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
       }
     } catch (err: any) {
       console.warn('Microphone access or MediaRecorder error:', err);
-      showToast(lang === 'ru' ? '⚠️ Ошибка доступа к микрофону' : lang === 'by' ? '⚠️ Памылка доступу да мікрафона' : '⚠️ 麦克风访问失败');
+      setTimerActive(false);
+      const isDenied = 
+        err.name === 'NotAllowedError' || 
+        err.name === 'PermissionDeniedError' || 
+        err.message?.includes('Permission') || 
+        err.message?.includes('RECORD_AUDIO_NOT_GRANTED');
+      if (isDenied) {
+        setMicPermissionDenied(true);
+      } else {
+        showToast(lang === 'ru' ? `⚠️ Ошибка запуска записи: ${err.message || err}` : `⚠️ Памылка запуску запісу: ${err.message || err}`);
+      }
     }
   };
 
@@ -1231,6 +1243,63 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Microphone Permission Denied Modal */}
+      {micPermissionDenied && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border-2 border-red-500/20 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <AlertCircle className="w-7 h-7 shrink-0" />
+              <h3 className="text-lg font-black font-sans">
+                {lang === 'ru' ? 'Доступ к микрофону заблокирован' : lang === 'by' ? 'Доступ да мікрафона заблакаваны' : 'Microphone Access Denied'}
+              </h3>
+            </div>
+            <p className="text-sm text-stone-700 leading-relaxed">
+              {lang === 'ru'
+                ? 'Для записи звука интервью приложению требуется разрешение на микрофон. Доступ был отклонен или заблокирован в системе.'
+                : lang === 'by'
+                ? 'Для запісу аўдыя апытання патрабуецца дазвол на мікрафон. Доступ быў заблакаваны ў сістэме.'
+                : 'Microphone permission is required to record field interviews.'}
+            </p>
+            <div className="p-3 bg-stone-100 rounded-xl text-xs text-stone-800 space-y-1">
+              <p className="font-bold">
+                {lang === 'ru' ? 'Инструкция для Android / браузера:' : 'Instructions:'}
+              </p>
+              <p>
+                {lang === 'ru'
+                  ? '1. Откройте «Настройки устройства → Приложения → Etnofield → Разрешения → Микрофон».'
+                  : '1. Open Device Settings → Apps → Etnofield → Permissions → Microphone.'}
+              </p>
+              <p>
+                {lang === 'ru'
+                  ? '2. Выберите «Разрешать только во время использования приложения».'
+                  : '2. Select "Allow only while using the app".'}
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              {isCapacitorAndroid() && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await openNativeAppSettings();
+                    setMicPermissionDenied(false);
+                  }}
+                  className="px-4 py-2.5 bg-[#B66029] hover:bg-[#8d481f] text-white rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-xs"
+                >
+                  {lang === 'ru' ? 'Настройки устройства' : 'Open Settings'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setMicPermissionDenied(false)}
+                className="px-4 py-2.5 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer"
+              >
+                {lang === 'ru' ? 'Понятно / Закрыть' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Segmented Mode Selector Button Group */}
       <div className="flex bg-[#eCebeb] p-1.5 rounded-xl border border-sahara-surface-dim/40 max-w-md mx-auto shadow-2xs">

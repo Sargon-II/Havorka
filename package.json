@@ -7,10 +7,13 @@
     "dev": "vite --port 3000 --host",
     "build": "vite build",
     "build:native": "cross-env BUILD_TARGET=native VITE_BASE=./ vite build",
+    "android:sync": "npm run build:native && cap sync android",
+    "android:debug": "node scripts/build-android.mjs assembleDebug",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
     "@capacitor/core": "^8.6.0",
     "@capacitor/filesystem": "^8.1.5",
     "@capacitor/share": "^8.0.3",
@@ -32,6 +35,7 @@
     "react-dom": "^19.0.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "cross-env": "^10.1.0",

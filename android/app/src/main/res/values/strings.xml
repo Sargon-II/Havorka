@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Etnofield</string>
+    <string name="title_activity_main">Etnofield</string>
+    <string name="package_name">com.etnofield.app</string>
+    <string name="custom_url_scheme">com.etnofield.app</string>
+</resources>

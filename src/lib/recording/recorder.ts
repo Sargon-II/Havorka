@@ -4,6 +4,13 @@
  */
 
 import { getDB, SessionRecord, AudioGap, AudioSegmentMeta, AudioChunkRecord } from '../storage/db';
+import {
+  isCapacitorAndroid,
+  startNativeForegroundService,
+  stopNativeForegroundService,
+  addAudioFocusListener,
+} from '../../platform/nativeRecording';
+import { logEvent, setDiagnosticSessionStart } from '../diagnostics/log';
 
 export type RecorderStatus = 'idle' | 'recording' | 'paused' | 'interrupted';
 
@@ -74,6 +81,15 @@ export class RobustAudioRecorder {
   private isIntentionallyStopped = false;
   private currentGap: AudioGap | null = null;
   private callbacks: RecorderCallbacks;
+  private nativeFocusListener?: { remove: () => Promise<void> };
+
+  private lastChunkTimestamp = 0;
+  private minuteChunksCount = 0;
+  private minuteMaxIntervalSec = 0;
+  private minuteLevelSum = 0;
+  private minuteLevelCount = 0;
+  private minuteLevelMax = 0;
+  private pulseIntervalId: any = null;
 
   private beforeUnloadHandler = (e: BeforeUnloadEvent) => {
     if (this.status === 'recording' || this.status === 'interrupted') {
@@ -86,8 +102,10 @@ export class RobustAudioRecorder {
     if (this.status !== 'recording') return;
 
     if (document.visibilityState === 'hidden') {
+      logEvent('VIS_HIDDEN');
       this.recordGapStart('visibility_hidden');
     } else if (document.visibilityState === 'visible') {
+      logEvent('VIS_VISIBLE');
       this.recordGapEnd();
       this.requestWakeLock();
 
@@ -102,6 +120,7 @@ export class RobustAudioRecorder {
   private deviceChangeHandler = async () => {
     if (this.status !== 'recording') return;
     console.warn('[Recorder] Audio device changed (headphones/bluetooth/mic disconnected)');
+    logEvent('DEV_CHANGE');
     this.callbacks.onAlert?.('Аудиоустройство изменилось, переподключение микрофона...', 'warning');
     playAlertChime();
     triggerVibration();
@@ -176,6 +195,9 @@ export class RobustAudioRecorder {
       navigator.mediaDevices.addEventListener('devicechange', this.deviceChangeHandler);
     }
 
+    setDiagnosticSessionStart(this.sessionStartTime);
+    logEvent('START');
+
     await this.startNewSegment();
     await this.requestWakeLock();
 
@@ -184,22 +206,88 @@ export class RobustAudioRecorder {
 
   private async startNewSegment(): Promise<void> {
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      } catch (gumErr: any) {
+        logEvent('GUM_ERR', gumErr?.name || gumErr?.message || 'denied');
+        throw gumErr;
+      }
 
       this.audioTrack = this.stream.getAudioTracks()[0];
       if (!this.audioTrack) {
+        logEvent('GUM_ERR', 'NO_AUDIO_TRACK');
         throw new Error('NO_AUDIO_TRACK');
+      }
+
+      const trackSettings = this.audioTrack.getSettings ? this.audioTrack.getSettings() : {};
+      const gumDetails = [
+        trackSettings.sampleRate ? `rate=${trackSettings.sampleRate}` : '',
+        trackSettings.channelCount ? `ch=${trackSettings.channelCount}` : '',
+      ].filter(Boolean).join(' ');
+      logEvent('GUM_OK', gumDetails || undefined);
+
+      // Start Android Foreground Service and bind AudioFocus monitoring
+      if (isCapacitorAndroid()) {
+        try {
+          const serviceRes = await startNativeForegroundService();
+          logEvent('SRV_START_OK', `notif=${serviceRes.notificationsGranted}`);
+          if (!serviceRes.notificationsGranted) {
+            this.callbacks.onAlert?.(
+              'Уведомления отключены. Включите их в настройках для контроля фоновой записи.',
+              'warning'
+            );
+          }
+        } catch (serviceErr: any) {
+          console.error('[Recorder] Failed to start native foreground service:', serviceErr);
+          logEvent('SRV_START_ERR', serviceErr.message || String(serviceErr));
+          this.audioTrack.stop();
+          this.stream?.getTracks().forEach((t) => t.stop());
+          throw new Error(`Не удалось запустить фоновую службу Android: ${serviceErr.message || serviceErr}`);
+        }
+
+        if (!this.nativeFocusListener) {
+          this.nativeFocusListener = await addAudioFocusListener(async (event) => {
+            if (event.type === 'gain') {
+              logEvent('FOCUS_GAIN');
+              console.log('[Recorder] Audio focus regained');
+              this.callbacks.onAlert?.(
+                'Аудиофокус восстановлен. Нажмите «Продолжить запись», чтобы возобновить интервью.',
+                'info'
+              );
+              this.callbacks.onRequiresUserGesture?.(true);
+              return;
+            }
+
+            logEvent('FOCUS_LOSS', `type=${event.type}`);
+            if (event.type === 'can_duck') {
+              return;
+            }
+            if (event.type === 'loss' || event.type === 'loss_transient') {
+              console.warn('[Recorder] Audio focus lost (call / other app)');
+              this.recordGapStart('audio_focus_loss');
+              this.callbacks.onAlert?.(
+                'Запись приостановлена: входящий звонок или другое приложение перехватило микрофон. Завершите разговор и нажмите «Продолжить запись».',
+                'error'
+              );
+              playAlertChime();
+              triggerVibration();
+              await this.pause();
+              this.callbacks.onRequiresUserGesture?.(true);
+            }
+          });
+        }
       }
 
       // Track listeners
       this.audioTrack.onmute = () => {
         console.warn('[Recorder] Audio track muted by OS/hardware');
+        logEvent('TRK_MUTE');
         this.recordGapStart('track_muted');
         this.callbacks.onAlert?.('Микрофон занят или отключён системой!', 'error');
         playAlertChime();
@@ -208,6 +296,7 @@ export class RobustAudioRecorder {
 
       this.audioTrack.onunmute = () => {
         console.log('[Recorder] Audio track unmuted');
+        logEvent('TRK_UNMUTE');
         this.recordGapEnd();
         this.callbacks.onClearAlert?.();
       };
@@ -215,6 +304,7 @@ export class RobustAudioRecorder {
       this.audioTrack.onended = () => {
         if (!this.isIntentionallyStopped) {
           console.warn('[Recorder] Audio track ended unexpectedly');
+          logEvent('TRK_ENDED');
           this.recordGapStart('track_ended');
           this.handleInterruption('Поток микрофона прерван (track ended)');
         }
@@ -269,9 +359,27 @@ export class RobustAudioRecorder {
         }
       }
 
+      logEvent('SEG_OPEN', `seg=${this.currentSegmentIndex}`);
+
       // MediaRecorder events
       recorder.ondataavailable = async (event) => {
-        if (event.data && event.data.size > 0 && this.sessionId) {
+        const now = Date.now();
+        const intervalSec = this.lastChunkTimestamp > 0
+          ? (now - this.lastChunkTimestamp) / 1000
+          : (now - this.currentSegmentStartTime) / 1000;
+        this.lastChunkTimestamp = now;
+
+        const size = event.data?.size ?? 0;
+        if (intervalSec > 15 || size === 0) {
+          logEvent('CHUNK_ANOMALY', `int=${intervalSec.toFixed(1)}s size=${size}`);
+        }
+
+        this.minuteChunksCount++;
+        if (intervalSec > this.minuteMaxIntervalSec) {
+          this.minuteMaxIntervalSec = intervalSec;
+        }
+
+        if (event.data && size > 0 && this.sessionId) {
           const chunkRecord: AudioChunkRecord = {
             sessionId: this.sessionId,
             segmentIndex: this.currentSegmentIndex,
@@ -298,7 +406,9 @@ export class RobustAudioRecorder {
       };
 
       recorder.onerror = (event: any) => {
+        const errorDetail = event.error?.name || event.error?.message || 'unknown';
         console.error('[Recorder] MediaRecorder error:', event.error || event);
+        logEvent('REC_ERR', errorDetail);
         this.handleInterruption('Ошибка MediaRecorder');
       };
 
@@ -308,6 +418,8 @@ export class RobustAudioRecorder {
 
       // 10000ms timeslice as requested
       recorder.start(10000);
+      this.lastChunkTimestamp = Date.now();
+      this.startPulseTimer();
       this.status = 'recording';
       this.callbacks.onStatusChange?.('recording');
       this.callbacks.onClearAlert?.();
@@ -343,6 +455,12 @@ export class RobustAudioRecorder {
         const level = sum / (buffer.length * 255); // 0.0 to 1.0
         this.callbacks.onAudioLevel?.(level);
 
+        this.minuteLevelSum += level;
+        this.minuteLevelCount++;
+        if (level > this.minuteLevelMax) {
+          this.minuteLevelMax = level;
+        }
+
         const now = Date.now();
         const delta = now - lastCheckTime;
         lastCheckTime = now;
@@ -366,6 +484,40 @@ export class RobustAudioRecorder {
       this.levelRafId = requestAnimationFrame(monitorLevel);
     } catch (e) {
       console.warn('[Recorder] AudioContext analysis not available:', e);
+    }
+  }
+
+  private startPulseTimer(): void {
+    this.stopPulseTimer();
+    this.minuteChunksCount = 0;
+    this.minuteMaxIntervalSec = 0;
+    this.minuteLevelSum = 0;
+    this.minuteLevelCount = 0;
+    this.minuteLevelMax = 0;
+
+    this.pulseIntervalId = setInterval(() => {
+      if (this.status !== 'recording') return;
+
+      const avgLvl = this.minuteLevelCount > 0
+        ? Math.round((this.minuteLevelSum / this.minuteLevelCount) * 100)
+        : 0;
+      const maxLvl = Math.round(this.minuteLevelMax * 100);
+      const maxInt = this.minuteMaxIntervalSec.toFixed(1);
+
+      logEvent('PULSE', `chunks=${this.minuteChunksCount} max_int=${maxInt}s avg_lvl=${avgLvl} max_lvl=${maxLvl}`);
+
+      this.minuteChunksCount = 0;
+      this.minuteMaxIntervalSec = 0;
+      this.minuteLevelSum = 0;
+      this.minuteLevelCount = 0;
+      this.minuteLevelMax = 0;
+    }, 60000);
+  }
+
+  private stopPulseTimer(): void {
+    if (this.pulseIntervalId) {
+      clearInterval(this.pulseIntervalId);
+      this.pulseIntervalId = null;
     }
   }
 
@@ -398,6 +550,9 @@ export class RobustAudioRecorder {
   private async handleInterruption(reasonDescription: string) {
     if (this.isIntentionallyStopped) return;
 
+    this.stopPulseTimer();
+    logEvent('SEG_CLOSE', `seg=${this.currentSegmentIndex} reason=${reasonDescription}`);
+
     this.status = 'interrupted';
     this.callbacks.onStatusChange?.('interrupted');
     this.callbacks.onAlert?.(`Запись прервана: ${reasonDescription}`, 'error');
@@ -409,6 +564,7 @@ export class RobustAudioRecorder {
 
     if (this.retryCount < 3) {
       this.retryCount++;
+      logEvent('RECOVERY', `attempt=${this.retryCount}/3`);
       const delayMs = 2000;
       console.log(`[Recorder] Attempting auto-recovery in ${delayMs}ms (attempt ${this.retryCount}/3)...`);
       this.callbacks.onAlert?.(
@@ -452,10 +608,17 @@ export class RobustAudioRecorder {
 
   public async pause(): Promise<void> {
     if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+      this.stopPulseTimer();
+      logEvent('SEG_CLOSE', `seg=${this.currentSegmentIndex} reason=manual_pause`);
       this.mediaRecorder.pause();
       this.status = 'paused';
       this.callbacks.onStatusChange?.('paused');
       this.recordGapStart('manual_pause');
+
+      if (isCapacitorAndroid()) {
+        logEvent('SRV_STOP');
+        await stopNativeForegroundService().catch(console.error);
+      }
 
       if (this.sessionId) {
         const db = await getDB();
@@ -472,6 +635,16 @@ export class RobustAudioRecorder {
 
   public async resume(): Promise<void> {
     if (this.mediaRecorder && this.mediaRecorder.state === 'paused') {
+      if (isCapacitorAndroid()) {
+        try {
+          const serviceRes = await startNativeForegroundService();
+          logEvent('SRV_START_OK', `notif=${serviceRes.notificationsGranted}`);
+        } catch (serviceErr: any) {
+          logEvent('SRV_START_ERR', serviceErr?.message || String(serviceErr));
+        }
+      }
+      this.lastChunkTimestamp = Date.now();
+      this.startPulseTimer();
       this.mediaRecorder.resume();
       this.status = 'recording';
       this.callbacks.onStatusChange?.('recording');
@@ -492,10 +665,21 @@ export class RobustAudioRecorder {
 
   public async stop(): Promise<Blob | null> {
     this.isIntentionallyStopped = true;
+    this.stopPulseTimer();
+    logEvent('SEG_CLOSE', `seg=${this.currentSegmentIndex} reason=completed`);
     this.status = 'idle';
     this.callbacks.onStatusChange?.('idle');
     this.callbacks.onClearAlert?.();
     this.callbacks.onRequiresUserGesture?.(false);
+
+    if (isCapacitorAndroid()) {
+      logEvent('SRV_STOP');
+      await stopNativeForegroundService().catch(console.error);
+      if (this.nativeFocusListener) {
+        await this.nativeFocusListener.remove().catch(console.error);
+        this.nativeFocusListener = undefined;
+      }
+    }
 
     window.removeEventListener('beforeunload', this.beforeUnloadHandler);
     document.removeEventListener('visibilitychange', this.visibilityChangeHandler);
@@ -515,6 +699,9 @@ export class RobustAudioRecorder {
     }
 
     this.cleanupCurrentStream();
+
+    logEvent('STOP');
+    setDiagnosticSessionStart(null);
 
     if (this.sessionId) {
       const db = await getDB();
@@ -547,14 +734,19 @@ export class RobustAudioRecorder {
       this.stream = null;
       this.audioTrack = null;
     }
+    if (isCapacitorAndroid()) {
+      stopNativeForegroundService().catch(() => {});
+    }
   }
 
   private async requestWakeLock() {
     if (typeof navigator !== 'undefined' && 'wakeLock' in navigator && (navigator as any).wakeLock?.request) {
       try {
         this.wakeLock = await (navigator as any).wakeLock.request('screen');
-      } catch (err) {
+        logEvent('WL_ACQ');
+      } catch (err: any) {
         console.warn('[Recorder] WakeLock request error:', err);
+        logEvent('WL_ERR', err?.message || String(err));
       }
     }
   }
@@ -563,6 +755,7 @@ export class RobustAudioRecorder {
     if (this.wakeLock) {
       this.wakeLock.release().catch(() => {});
       this.wakeLock = null;
+      logEvent('WL_REL');
     }
   }
 }

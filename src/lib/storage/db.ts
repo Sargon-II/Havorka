@@ -15,6 +15,7 @@ export interface AudioGap {
     | 'device_changed'
     | 'visibility_hidden'
     | 'recorder_crashed'
+    | 'audio_focus_loss'
     | 'manual_pause';
 }
 

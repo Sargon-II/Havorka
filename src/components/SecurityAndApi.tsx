@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Key, ShieldAlert, ShieldCheck, ExternalLink, Copy, Check, Terminal, PlayCircle, Loader2, AlertCircle, Bot, Cpu, Sparkles, FileAudio, Trash2, UploadCloud, Volume2, RefreshCw, Database, HardDrive } from 'lucide-react';
+import { Key, ShieldAlert, ShieldCheck, ExternalLink, Copy, Check, Terminal, PlayCircle, Loader2, AlertCircle, Bot, Cpu, Sparkles, FileAudio, Trash2, UploadCloud, Volume2, RefreshCw, Database, HardDrive, Activity, Download } from 'lucide-react';
 import { PromptPack, ModelGuide } from '../types';
 import { DEFAULT_PROMPT_PACKS, DEFAULT_MODEL_GUIDES } from '../data/defaultData';
 import { Language } from '../lib/translations';
@@ -13,6 +13,13 @@ import { getApiKey, setApiKey, clearApiKey } from '../lib/apiKey';
 import { generateText } from '../lib/gemini';
 import { usePersistentState } from '../lib/storage/usePersistentState';
 import { getStoragePersistenceStatus, requestStoragePersistence, StoragePersistenceStatus } from '../lib/storage/persistence';
+import {
+  getDiagnosticLog,
+  getDiagnosticLogStats,
+  clearDiagnosticLog,
+  buildDiagnosticExportContent,
+} from '../lib/diagnostics/log';
+import { saveFile } from '../platform/files';
 
 interface SecurityAndApiProps {
   lang: Language;
@@ -46,6 +53,17 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
   // Storage persistence status
   const [persistenceStatus, setPersistenceStatus] = useState<StoragePersistenceStatus>({ supported: false, persisted: false });
   const [isRequestingPersist, setIsRequestingPersist] = useState(false);
+
+  // Diagnostics log status
+  const [diagStats, setDiagStats] = useState<{ count: number; bytes: number; maxLines: number; maxBytes: number }>({
+    count: 0,
+    bytes: 0,
+    maxLines: 800,
+    maxBytes: 60 * 1024,
+  });
+  const [isExportingDiag, setIsExportingDiag] = useState(false);
+  const [isClearingDiag, setIsClearingDiag] = useState(false);
+  const [diagActionMessage, setDiagActionMessage] = useState<string | null>(null);
 
   // Guide selection states (relocated to 4th tab)
   const [selectedGuideId, setSelectedGuideId] = useState<string>(DEFAULT_MODEL_GUIDES[0].id);
@@ -190,7 +208,67 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
     }
 
     getStoragePersistenceStatus().then(setPersistenceStatus);
+    refreshDiagStats();
   }, []);
+
+  const refreshDiagStats = async () => {
+    try {
+      const stats = await getDiagnosticLogStats();
+      setDiagStats(stats);
+    } catch (err) {
+      console.warn('Failed to load diag log stats:', err);
+    }
+  };
+
+  const handleExportDiag = async () => {
+    setIsExportingDiag(true);
+    try {
+      const lines = await getDiagnosticLog();
+      const text = buildDiagnosticExportContent(lines);
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const now = new Date();
+      const datePart = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const timePart = now.toTimeString().slice(0, 8).replace(/:/g, '');
+      const filename = `etnofield-diag-${datePart}-${timePart}.txt`;
+      await saveFile(blob, filename, 'text/plain');
+      setDiagActionMessage(
+        lang === 'ru'
+          ? 'Журнал успешно экспортирован'
+          : lang === 'by'
+          ? 'Журнал паспяхова экспартаваны'
+          : '诊断日志已成功导出'
+      );
+      setTimeout(() => setDiagActionMessage(null), 3500);
+    } catch (err: any) {
+      console.error('Diagnostic log export failed:', err);
+    } finally {
+      setIsExportingDiag(false);
+    }
+  };
+
+  const handleClearDiag = async () => {
+    const confirmText =
+      lang === 'ru'
+        ? 'Очистить журнал диагностики записи?'
+        : lang === 'by'
+        ? 'Ачысціць журнал дыягностыкі запісу?'
+        : '确定要清空录音诊断日志吗？';
+    if (!window.confirm(confirmText)) return;
+
+    setIsClearingDiag(true);
+    try {
+      await clearDiagnosticLog();
+      await refreshDiagStats();
+      setDiagActionMessage(
+        lang === 'ru' ? 'Журнал очищен' : lang === 'by' ? 'Журнал ачышчаны' : '日志已清空'
+      );
+      setTimeout(() => setDiagActionMessage(null), 3000);
+    } catch (err: any) {
+      console.error('Failed to clear diagnostic log:', err);
+    } finally {
+      setIsClearingDiag(false);
+    }
+  };
 
   const handleRequestPersist = async () => {
     setIsRequestingPersist(true);
@@ -1125,6 +1203,95 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
                   <span>{isRequestingPersist ? '...' : (lang === 'ru' ? 'Запросить защиту (persist)' : lang === 'by' ? 'Запытаць абарону (persist)' : '申请持久化 (persist)')}</span>
                 </button>
               )}
+            </div>
+          </div>
+
+          {/* Section: Diagnostics Log */}
+          <div className="bg-white border border-sahara-surface-dim/40 rounded-xl p-6 md:p-8 space-y-5 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-sahara-surface-dim/30 pb-4 gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-md bg-green-100/20 text-sahara-primary">
+                  <Activity className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-serif font-black text-sahara-primary">
+                    {lang === 'ru' ? 'Диагностика записи' : lang === 'by' ? 'Дыягностыка запісу' : '录音诊断'}
+                  </h3>
+                  <p className="text-xs text-sahara-secondary">
+                    {lang === 'ru'
+                      ? 'Компактный журнал аудиозахвата и фоновой службы (для проверки на телефоне без ADB)'
+                      : lang === 'by'
+                      ? 'Кампактны журнал аўдыязахопу і фонавай службы (для праверкі на тэлефоне без ADB)'
+                      : '用于在无ADB连接的真机上排查音频与后台服务运行状态'}
+                  </p>
+                </div>
+              </div>
+              <div className="self-start sm:self-auto px-2.5 py-1 rounded-full text-xs font-bold bg-sahara-background text-sahara-secondary border border-sahara-surface-dim flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                <span>{lang === 'ru' ? 'Журнал вне записи не растёт' : lang === 'by' ? 'Журнал па-за запісам не расце' : '非录音期间零增长'}</span>
+              </div>
+            </div>
+
+            <div className="bg-sahara-background/60 border border-sahara-surface-dim/40 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs font-sans">
+              <div className="space-y-1.5 flex-1">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                  <span className="text-sahara-onbackground font-medium">
+                    {lang === 'ru' ? 'Размер журнала:' : lang === 'by' ? 'Памер журнала:' : '日志体积:'}
+                  </span>
+                  <span className="font-mono font-bold text-sahara-primary bg-white px-2 py-0.5 rounded border border-sahara-surface-dim/50">
+                    {diagStats.count} / {diagStats.maxLines} {lang === 'ru' ? 'строк' : lang === 'by' ? 'радкоў' : '行'}
+                  </span>
+                  <span className="text-sahara-secondary">|</span>
+                  <span className="font-mono font-bold text-sahara-primary bg-white px-2 py-0.5 rounded border border-sahara-surface-dim/50">
+                    {(diagStats.bytes / 1024).toFixed(1)} КБ / {(diagStats.maxBytes / 1024).toFixed(0)} КБ
+                  </span>
+                </div>
+                <p className="text-sahara-secondary text-[11px] leading-relaxed">
+                  {lang === 'ru'
+                    ? 'Кольцевой буфер (до 800 строк и 60 КБ) сохраняет события старта/стопа, переходов в фон, аудиофокуса, сбоев и поминутный пульс.'
+                    : lang === 'by'
+                    ? 'Кальцавы буфер (да 800 радкоў і 60 КБ) захоўвае падзеі старту/стопу, пераходаў у фон, аўдыяфокусу, збояў і штохвілінны пульс.'
+                    : '环形缓冲区（上限800行 / 60KB）记录启停、后台可见性、音频焦点、故障及每分钟心跳指标。'}
+                </p>
+                {diagActionMessage && (
+                  <p className="text-green-700 font-bold text-[11px] animate-fade-in flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5 text-green-600" />
+                    <span>{diagActionMessage}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleExportDiag}
+                  disabled={isExportingDiag}
+                  className="px-3.5 py-2 bg-sahara-primary hover:bg-sahara-primary/90 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+                  title={lang === 'ru' ? 'Экспортировать журнал в текстовый файл' : 'Экспартаваць журнал у тэкставы файл'}
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>
+                    {isExportingDiag
+                      ? '...'
+                      : lang === 'ru'
+                      ? 'Экспортировать'
+                      : lang === 'by'
+                      ? 'Экспартаваць'
+                      : '导出'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearDiag}
+                  disabled={isClearingDiag || diagStats.count === 0}
+                  className="px-3 py-2 bg-white hover:bg-red-50 text-sahara-secondary hover:text-red-600 border border-sahara-surface-dim rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={lang === 'ru' ? 'Очистить журнал диагностики' : 'Ачысціць журнал дыягностыкі'}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{lang === 'ru' ? 'Очистить' : lang === 'by' ? 'Ачысціць' : '清空'}</span>
+                </button>
+              </div>
             </div>
           </div>
 
