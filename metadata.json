@@ -1,0 +1,8 @@
+{
+  "name": "Полевой помощник исследователя",
+  "description": "Инструментарий исследователя и этнолога для Беларуси: визуальный конструктор опросников, анализ билингвизма, спонтанной речи, кодирование текстов и памятка по моделям (AI Studio/Qwen/DeepSeek).",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

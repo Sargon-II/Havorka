@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="128" fill="#0f172a"/>
+  <!-- Subtle design framing -->
+  <path d="M64 128 h32 v-32 h32 v-32" stroke="#334155" stroke-width="8" fill="none" />
+  <path d="M448 128 h-32 v-32 h-32 v-32" stroke="#334155" stroke-width="8" fill="none" />
+  <path d="M64 384 h32 v32 h32 v32" stroke="#334155" stroke-width="8" fill="none" />
+  <path d="M448 384 h-32 v32 h-32 v32" stroke="#334155" stroke-width="8" fill="none" />
+  <!-- Central Document Sheet -->
+  <rect x="156" y="140" width="200" height="260" rx="20" fill="#f8fafc" stroke="#38bdf8" stroke-width="12"/>
+  <path d="M220 140 v-20a10 10 0 0 1 10-10 h64a10 10 0 0 1 10 10 v20" fill="#cbd5e1" stroke="#38bdf8" stroke-width="8" />
+  <!-- Lines representing transcripts -->
+  <line x1="196" y1="200" x2="316" y2="200" stroke="#94a3b8" stroke-width="10" stroke-linecap="round" />
+  <line x1="196" y1="242" x2="280" y2="242" stroke="#94a3b8" stroke-width="10" stroke-linecap="round" />
+  <!-- Waveform of recording/bilingual voice -->
+  <path d="M196 320 c 5 -15, 10 -15, 15 0 c 5 15, 10 15, 15 0 c 5 -30, 10 -30, 15 0 c 5 30, 10 30, 15 0 c 5 -15, 10 -15, 15 0 c 5 15, 10 15, 15 0" stroke="#0ea5e9" stroke-width="12" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+  <!-- Beautiful red ornamental geometric element (Belarusian folklore-inspired, subtle, modern) -->
+  <path d="M370 230 h40 M390 210 v40 M378 218 l24 24 M402 218 l-24 24" stroke="#f43f5e" stroke-width="6" fill="none" />
+</svg>
