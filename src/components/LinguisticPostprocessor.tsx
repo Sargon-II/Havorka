@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { usePersistentState } from '../lib/storage/usePersistentState';
 import { getKV } from '../lib/storage/db';
+import { saveFile } from '../platform/files';
 import { 
   Check, 
   Download, 
@@ -584,13 +585,8 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
       }
 
       const content = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(content);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `Экспедиция_Архив_Документов_${new Date().toLocaleDateString('ru-RU').replace(/\//g, '-')}.zip`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const filename = `Экспедиция_Архив_Документов_${new Date().toLocaleDateString('ru-RU').replace(/\//g, '-')}.zip`;
+      await saveFile(content, filename, 'application/zip');
     } catch (err: any) {
       console.error("ZIP packaging error:", err);
       alert("Ошибка при упаковке архива: " + err.message);
@@ -1011,13 +1007,11 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
     });
 
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `faceted_protocol_${metadata.informantCode || 'report'}.md`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const filename = `faceted_protocol_${metadata.informantCode || 'report'}.md`;
+    saveFile(blob, filename, 'text/markdown').catch((err: any) => {
+      console.error("Failed to save markdown file:", err);
+      alert(`Ошибка при сохранении файла: ${err.message || err}`);
+    });
   };
 
   const exportDocxProtocol = () => {
@@ -1172,14 +1166,14 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
         }]
       });
 
-      Packer.toBlob(doc).then((blob) => {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `faceted_protocol_${metadata.informantCode || 'report'}.docx`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+      Packer.toBlob(doc).then(async (blob) => {
+        try {
+          const filename = `faceted_protocol_${metadata.informantCode || 'report'}.docx`;
+          await saveFile(blob, filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        } catch (err: any) {
+          console.error("DOCX save error:", err);
+          alert("Ошибка при сохранении DOCX: " + (err.message || err));
+        }
       });
     } catch (e: any) {
       console.error("docx error:", e);

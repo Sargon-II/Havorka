@@ -22,6 +22,7 @@ import { usePersistentState } from '../lib/storage/usePersistentState';
 import { getKV, setKV } from '../lib/storage/db';
 import { useRecorder } from '../lib/recording/useRecorder';
 import { exportSessionBlob } from '../lib/recording/recorder';
+import { saveFile } from '../platform/files';
 
 interface QuestionnaireBuilderProps {
   questionnaire: Questionnaire;
@@ -642,7 +643,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     }
   };
 
-  const triggerAudioFileDownload = (blobToDownload: Blob | null) => {
+  const triggerAudioFileDownload = async (blobToDownload: Blob | null) => {
     const finalBlob = blobToDownload || audioBlob;
     if (!finalBlob) {
       showToast(lang === 'ru' 
@@ -665,25 +666,18 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     const safeResearcher = cleanForFilename(sessionResearcher) || 'Исследователь';
     const safeDate = cleanForFilename(sessionDate) || '2026';
 
-    const filename = `Полевые записи/Полевая_аудиозапись_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.mp3`;
+    const filename = `Полевая_аудиозапись_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.mp3`;
 
     try {
-      const url = URL.createObjectURL(finalBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
+      await saveFile(finalBlob, filename, finalBlob.type || 'audio/mpeg');
       showToast(lang === 'ru' 
-        ? 'Аудиозапись .MP3 успешно скачана в папку Полевые записи!' 
+        ? 'Аудиозапись .MP3 успешно сохранена!' 
         : lang === 'by' 
-        ? 'Аўдыязапіс .MP3 паспяхова спампаваны ў тэчку Полевыя запісы!' 
-        : 'MP3 recording downloaded successfully!');
-    } catch (err) {
+        ? 'Аўдыязапіс .MP3 паспяхова захаваны!' 
+        : 'MP3 recording saved successfully!');
+    } catch (err: any) {
       console.error('Failed to download audio file', err);
+      showToast(lang === 'ru' ? `Ошибка сохранения аудио: ${err.message || err}` : `Памылка захавання аўдыя: ${err.message || err}`);
     }
   };
 
@@ -696,7 +690,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
     if (!blobToDownload && currentSession) {
       blobToDownload = await exportSessionBlob(currentSession.id);
     }
-    triggerAudioFileDownload(blobToDownload);
+    await triggerAudioFileDownload(blobToDownload);
   };
 
   // Start the device's camera stream for live photofixation
@@ -1069,23 +1063,20 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
       const safeResearcher = cleanForFilename(sessionResearcher) || 'Исследователь';
       const safeDate = cleanForFilename(sessionDate) || '2026';
 
-      const filename = `Полевые записи/Полевые_записи_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.docx`;
+      const filename = `Полевые_записи_Шифр_${safeInformant}_Локация_${safeLocation}_Исследователь_${safeResearcher}_Дата_${safeDate}.docx`;
 
-      Packer.toBlob(doc).then((blob) => {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-        showToast(lang === 'ru' 
-          ? 'Протокол в формате DOCX успешно загружен в папку Полевые записи!' 
-          : lang === 'by'
-          ? 'Пратакол у фармаце DOCX паспяхова спампаваны ў тэчку Полевыя запісы!'
-          : '访谈记录 Word 文档已成功生成并下载至设备中！');
+      Packer.toBlob(doc).then(async (blob) => {
+        try {
+          await saveFile(blob, filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+          showToast(lang === 'ru' 
+            ? 'Протокол в формате DOCX успешно сохранен!' 
+            : lang === 'by'
+            ? 'Пратакол у фармаце DOCX паспяхова захаваны!'
+            : '访谈记录 Word 文档已成功生成并保存！');
+        } catch (err: any) {
+          console.error("Failed to save DOCX file:", err);
+          showToast(lang === 'ru' ? `Ошибка сохранения DOCX: ${err.message || err}` : `Памылка захавання DOCX: ${err.message || err}`);
+        }
       });
 
     } catch (err) {

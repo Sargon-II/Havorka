@@ -9,6 +9,7 @@ import { PromptPack, ModelGuide } from '../types';
 import { DEFAULT_PROMPT_PACKS, DEFAULT_MODEL_GUIDES } from '../data/defaultData';
 import { Language, translations } from '../lib/translations';
 import { gsap } from 'gsap';
+import { saveFile } from '../platform/files';
 
 interface PromptLibraryProps {
   lang: Language;
@@ -222,16 +223,14 @@ export default function PromptLibrary({ lang }: PromptLibraryProps) {
     return md;
   };
 
-  const handleDownloadMarkdown = () => {
-    const markdownContent = generateMarkdownExport();
-    const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `sociolinguistic_prompts_${lang}.md`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownloadMarkdown = async () => {
+    try {
+      const markdownContent = generateMarkdownExport();
+      const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8;' });
+      await saveFile(blob, `sociolinguistic_prompts_${lang}.md`, 'text/markdown');
+    } catch (err: any) {
+      console.error('Failed to save prompts markdown:', err);
+    }
   };
 
   const handleAddManualPrompt = () => {
