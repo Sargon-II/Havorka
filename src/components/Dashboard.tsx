@@ -119,7 +119,7 @@ export default function Dashboard({ questionnaire, loadPreset, resetToClean, set
   return (
     <div ref={containerRef} className="space-y-12 max-w-7xl mx-auto px-1 md:px-0">
       {/* Editorial Hero Unit */}
-      <div className="gsap-hero bg-white text-sahara-onbackground border border-sahara-surface-dim/50 rounded-xl p-6 sm:p-8 md:p-10 relative overflow-hidden shadow-xs">
+      <div className="gsap-hero bg-white text-sahara-onbackground border border-sahara-surface-dim/50 rounded-xl p-5 sm:p-8 md:p-10 relative overflow-hidden shadow-xs">
         {/* Subtle dot-grid alignment matching design spec */}
         <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{
           backgroundImage: 'radial-gradient(#974811 1.5px, transparent 1.5px)',
@@ -127,28 +127,28 @@ export default function Dashboard({ questionnaire, loadPreset, resetToClean, set
         }}></div>
 
         <div className="relative z-10 max-w-4xl space-y-4">
-          <span className="font-sans text-xs uppercase tracking-[0.15em] font-extrabold text-sahara-primary bg-sahara-clay/35 px-4 py-1.5 rounded-sm border border-sahara-primary/10 inline-block">
+          <span className="font-sans text-xs uppercase tracking-[0.15em] font-extrabold text-sahara-primary bg-sahara-clay/35 px-3 sm:px-4 py-1.5 rounded-sm border border-sahara-primary/10 inline-block break-words">
             {t.heroBadge}
           </span>
           
-          <h1 className="text-2xl md:text-4xl lg:text-5xl font-serif font-black tracking-tight leading-tight text-sahara-primary">
+          <h1 className="text-2xl md:text-4xl lg:text-5xl font-serif font-black tracking-tight leading-tight text-sahara-primary break-words">
             {t.heroTitle}
           </h1>
           
-          <p className="font-serif text-base text-sahara-secondary/95 leading-relaxed pt-1">
+          <p className="font-serif text-base text-sahara-secondary/95 leading-relaxed pt-1 break-words">
             {t.heroDescription}
           </p>
 
-          <div className="pt-6 flex flex-wrap gap-4">
+          <div className="pt-6 flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4">
             <button
               onClick={loadPreset}
-              className="bg-sahara-primary hover:bg-sahara-primary/90 text-white px-6 py-3.5 rounded-md font-sans text-xs sm:text-sm uppercase tracking-widest font-black transition-all shadow-md cursor-pointer hover:shadow-lg hover:scale-[1.01]"
+              className="bg-sahara-primary hover:bg-sahara-primary/90 text-white px-4 sm:px-6 py-3 sm:py-3.5 rounded-md font-sans text-xs sm:text-sm uppercase tracking-widest font-black transition-all shadow-md cursor-pointer hover:shadow-lg hover:scale-[1.01] min-h-[3rem] text-center break-words"
             >
               {t.btnLoadPreset}
             </button>
             <button
               onClick={resetToClean}
-              className="border-2 border-sahara-surface-dim/70 text-sahara-secondary hover:text-sahara-onbackground hover:bg-sahara-background px-6 py-3.5 rounded-md font-sans text-xs sm:text-sm uppercase tracking-widest font-black transition-all cursor-pointer bg-white shadow-xs"
+              className="border-2 border-sahara-surface-dim/70 text-sahara-secondary hover:text-sahara-onbackground hover:bg-sahara-background px-4 sm:px-6 py-3 sm:py-3.5 rounded-md font-sans text-xs sm:text-sm uppercase tracking-widest font-black transition-all cursor-pointer bg-white shadow-xs min-h-[3rem] text-center break-words"
             >
               {t.btnResetClean}
             </button>
@@ -157,39 +157,39 @@ export default function Dashboard({ questionnaire, loadPreset, resetToClean, set
       </div>
 
       {/* Quick Editorial Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="gsap-stat-card border border-sahara-surface-dim/40 rounded-xl p-8 flex flex-col justify-between bg-white text-sahara-onbackground shadow-xs hover:border-sahara-primary/20 transition-colors">
-          <span className="font-sans text-xs uppercase font-extrabold text-sahara-secondary/80 tracking-widest block mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <div className="gsap-stat-card border border-sahara-surface-dim/40 rounded-xl p-5 sm:p-8 flex flex-col justify-between bg-white text-sahara-onbackground shadow-xs hover:border-sahara-primary/20 transition-colors">
+          <span className="font-sans text-xs uppercase font-extrabold text-sahara-secondary/80 tracking-widest block mb-4 break-words">
             {t.statBlocks}
           </span>
-          <div className="flex items-baseline justify-between mt-auto">
-            <span className="text-6xl font-serif font-black text-sahara-primary">{totalBlocks}</span>
+          <div className="flex items-baseline justify-between mt-auto flex-wrap gap-1">
+            <span className="text-5xl sm:text-6xl font-serif font-black text-sahara-primary">{totalBlocks}</span>
             <span className="font-sans text-xs uppercase tracking-wider text-sahara-secondary font-extrabold">{t.statBlocksUnit}</span>
           </div>
         </div>
 
-        <div className="gsap-stat-card border border-sahara-surface-dim/40 rounded-xl p-8 flex flex-col justify-between bg-white text-sahara-onbackground shadow-xs hover:border-sahara-primary/20 transition-colors">
-          <span className="font-sans text-xs uppercase font-extrabold text-sahara-secondary/80 tracking-widest block mb-4">
+        <div className="gsap-stat-card border border-sahara-surface-dim/40 rounded-xl p-5 sm:p-8 flex flex-col justify-between bg-white text-sahara-onbackground shadow-xs hover:border-sahara-primary/20 transition-colors">
+          <span className="font-sans text-xs uppercase font-extrabold text-sahara-secondary/80 tracking-widest block mb-4 break-words">
             {t.statActive}
           </span>
-          <div className="flex items-baseline justify-between mt-auto">
-            <span className="text-6xl font-serif font-black text-sahara-tertiary">{completedTranscriptions}</span>
+          <div className="flex items-baseline justify-between mt-auto flex-wrap gap-1">
+            <span className="text-5xl sm:text-6xl font-serif font-black text-sahara-tertiary">{completedTranscriptions}</span>
             <span className="font-sans text-xs uppercase tracking-wider text-sahara-tertiary font-extrabold">{t.statActiveUnit}</span>
           </div>
         </div>
 
-        <div className="gsap-stat-card border border-sahara-surface-dim/40 rounded-xl p-8 flex flex-col justify-between bg-white text-sahara-onbackground shadow-xs hover:border-sahara-primary/20 transition-colors">
-          <span className="font-sans text-xs uppercase font-extrabold text-sahara-secondary/80 tracking-widest block mb-4">
+        <div className="gsap-stat-card border border-sahara-surface-dim/40 rounded-xl p-5 sm:p-8 flex flex-col justify-between bg-white text-sahara-onbackground shadow-xs hover:border-sahara-primary/20 transition-colors">
+          <span className="font-sans text-xs uppercase font-extrabold text-sahara-secondary/80 tracking-widest block mb-4 break-words">
             {t.statDisabled}
           </span>
-          <div className="flex items-baseline justify-between mt-auto">
-            <span className="text-6xl font-serif font-black text-sahara-secondary/50">{annotatedTranscriptions}</span>
+          <div className="flex items-baseline justify-between mt-auto flex-wrap gap-1">
+            <span className="text-5xl sm:text-6xl font-serif font-black text-sahara-secondary/50">{annotatedTranscriptions}</span>
             <span className="font-sans text-xs uppercase tracking-wider text-sahara-secondary/55 font-extrabold">{t.statDisabledUnit}</span>
           </div>
         </div>
 
-        <div className="gsap-stat-card border border-sahara-primary/10 rounded-xl p-8 flex flex-col justify-between bg-sahara-primary text-white shadow-md hover:bg-[#86400f] transition-colors">
-          <span className="font-sans text-xs uppercase font-extrabold text-white/80 tracking-widest block mb-4">
+        <div className="gsap-stat-card border border-sahara-primary/10 rounded-xl p-5 sm:p-8 flex flex-col justify-between bg-sahara-primary text-white shadow-md hover:bg-[#86400f] transition-colors">
+          <span className="font-sans text-xs uppercase font-extrabold text-white/80 tracking-widest block mb-4 break-words">
             {t.statDiary}
           </span>
           <div className="flex items-baseline justify-between mt-auto">

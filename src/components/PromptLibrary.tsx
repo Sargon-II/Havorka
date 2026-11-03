@@ -448,20 +448,20 @@ export default function PromptLibrary({ lang }: PromptLibraryProps) {
 
             {/* Export & Import Section at the bottom of the card */}
             <div className="border-t border-sahara-surface-dim/30 pt-6 mt-6 space-y-4">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   onClick={() => {
                     setIsExportOpen(!isExportOpen);
                     setIsImportOpen(false);
                   }}
-                  className={`w-full py-3 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 border hover:scale-[1.01] ${
+                  className={`w-full min-h-[2.5rem] py-2.5 px-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 border hover:scale-[1.01] text-center break-words ${
                     isExportOpen 
                       ? 'bg-sahara-primary text-white border-sahara-primary' 
                       : 'bg-sahara-clay/10 hover:bg-sahara-primary/10 text-sahara-primary border-sahara-primary/20'
                   }`}
                 >
-                  <Terminal className="w-3.5 h-3.5" />
-                  {isExportOpen ? exLocal.hideExport : exLocal.btnExport}
+                  <Terminal className="w-3.5 h-3.5 shrink-0" />
+                  <span>{isExportOpen ? exLocal.hideExport : exLocal.btnExport}</span>
                 </button>
 
                 <button
@@ -469,14 +469,14 @@ export default function PromptLibrary({ lang }: PromptLibraryProps) {
                     setIsImportOpen(!isImportOpen);
                     setIsExportOpen(false);
                   }}
-                  className={`w-full py-3 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 border hover:scale-[1.01] ${
+                  className={`w-full min-h-[2.5rem] py-2.5 px-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 border hover:scale-[1.01] text-center break-words ${
                     isImportOpen 
                       ? 'bg-sahara-primary text-white border-sahara-primary' 
                       : 'bg-sahara-clay/10 hover:bg-sahara-primary/10 text-sahara-primary border-sahara-primary/20'
                   }`}
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  {isImportOpen ? exLocal.hideImport : exLocal.btnImport}
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span>{isImportOpen ? exLocal.hideImport : exLocal.btnImport}</span>
                 </button>
               </div>
 
@@ -494,20 +494,20 @@ export default function PromptLibrary({ lang }: PromptLibraryProps) {
                     className="w-full p-2.5 text-[11px] font-mono rounded bg-white border border-sahara-surface-dim/50 focus:outline-none leading-relaxed text-sahara-onbackground focus:ring-1 focus:ring-sahara-primary"
                   />
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button
                       onClick={() => copyText(generateMarkdownExport(), 'export-markdown')}
-                      className="py-2.5 text-[10px] sm:text-xs font-sans font-black uppercase tracking-tight text-center rounded-lg border border-sahara-primary/30 text-sahara-primary bg-white hover:bg-sahara-clay/15 transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-[1.01]"
+                      className="min-h-[2.5rem] py-2 px-2 text-[10px] sm:text-xs font-sans font-black uppercase tracking-tight text-center rounded-lg border border-sahara-primary/30 text-sahara-primary bg-white hover:bg-sahara-clay/15 transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-[1.01] break-words"
                     >
-                      <Check className="w-3.5 h-3.5" style={{ display: copiedId === 'export-markdown' ? 'inline' : 'none' }} />
-                      {copiedId === 'export-markdown' ? exLocal.copiedToast : exLocal.copyExport}
+                      <Check className="w-3.5 h-3.5 shrink-0" style={{ display: copiedId === 'export-markdown' ? 'inline' : 'none' }} />
+                      <span>{copiedId === 'export-markdown' ? exLocal.copiedToast : exLocal.copyExport}</span>
                     </button>
                     
                     <button
                       onClick={handleDownloadMarkdown}
-                      className="py-2.5 text-[10px] sm:text-xs font-sans font-black uppercase tracking-tight text-center rounded-lg bg-sahara-primary text-white hover:bg-sahara-primary/95 transition-all cursor-pointer hover:scale-[1.01]"
+                      className="min-h-[2.5rem] py-2 px-2 text-[10px] sm:text-xs font-sans font-black uppercase tracking-tight text-center rounded-lg bg-sahara-primary text-white hover:bg-sahara-primary/95 transition-all cursor-pointer hover:scale-[1.01] break-words flex items-center justify-center"
                     >
-                      {exLocal.downloadFile}
+                      <span>{exLocal.downloadFile}</span>
                     </button>
                   </div>
                 </div>

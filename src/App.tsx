@@ -31,7 +31,7 @@ export default function App() {
 
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Sync font size to document root html element for perfect responsive rem scaling
+  // Sync font size and lang to document root html element for perfect responsive rem scaling and hyphenation
   useEffect(() => {
     const sizeMap: Record<string, string> = {
       sm: '14px',
@@ -40,7 +40,8 @@ export default function App() {
       xl: '20px',
     };
     document.documentElement.style.fontSize = sizeMap[fontSize] || '16px';
-  }, [fontSize]);
+    document.documentElement.lang = lang === 'by' ? 'be' : lang;
+  }, [fontSize, lang]);
 
   // Close font settings menu when clicking outside
   useEffect(() => {
@@ -128,9 +129,9 @@ export default function App() {
           className="flex-1 overflow-y-auto h-screen relative bg-sahara-background flex flex-col"
         >
           {/* Global mini-header bar */}
-          <header className="bg-white border-b border-sahara-surface-dim/40 px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between sticky top-0 z-40 gap-4 sm:gap-2">
-            <div className="flex items-center gap-3">
-              <span id="header-brand-title" className="font-serif text-xl tracking-tight text-sahara-primary font-bold">
+          <header className="bg-white border-b border-sahara-surface-dim/40 px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center justify-between sticky top-0 z-40 gap-3 sm:gap-2">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+              <span id="header-brand-title" className="font-serif text-lg sm:text-xl tracking-tight text-sahara-primary font-bold break-words min-w-0">
                 {t.headerTitle}
               </span>
               <span className="hidden lg:inline text-sm text-sahara-secondary/70 border-l border-sahara-surface-dim/70 pl-3">
@@ -138,7 +139,7 @@ export default function App() {
               </span>
             </div>
 
-            <div className="flex items-center gap-4 self-end sm:self-auto">
+            <div className="flex items-center gap-2 sm:gap-4 self-end sm:self-auto flex-wrap justify-end">
               {/* 3-Language switcher (RU/БЕЛ/КИТ) */}
               <div className="flex bg-sahara-background p-1 rounded-md border border-sahara-surface-dim/70 gap-1.5 shadow-2xs">
                 <button

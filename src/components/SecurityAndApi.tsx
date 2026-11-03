@@ -716,11 +716,11 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
               )}
             </div>
             {/* Custom Mode Toggle for Option 1 and Option 2 */}
-            <div className="grid grid-cols-2 gap-2 p-1 bg-sahara-surface-dim/40 rounded-lg">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-1 bg-sahara-surface-dim/40 rounded-lg">
               <button
                 type="button"
                 onClick={() => setSandboxMode('text')}
-                className={`py-1.5 px-3 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`min-h-[2.5rem] py-1.5 px-3 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center break-words ${
                   sandboxMode === 'text'
                     ? 'bg-white text-sahara-onbackground shadow-xs'
                     : 'text-sahara-secondary hover:text-sahara-onbackground'
@@ -731,13 +731,13 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
               <button
                 type="button"
                 onClick={() => setSandboxMode('audio')}
-                className={`py-1.5 px-3 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`min-h-[2.5rem] py-1.5 px-3 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center break-words ${
                   sandboxMode === 'audio'
                     ? 'bg-white text-sahara-onbackground shadow-xs'
                     : 'text-sahara-secondary hover:text-sahara-onbackground'
                 }`}
               >
-                <Volume2 className="w-3.5 h-3.5" />
+                <Volume2 className="w-3.5 h-3.5 shrink-0" />
                 <span>{lang === 'ru' ? 'Вариант 2: Промпт + Аудио' : lang === 'by' ? 'Варыянт 2: Промпт + Аўдыё' : '选项 2：提示词 + 音频'}</span>
               </button>
             </div>
@@ -777,7 +777,7 @@ export default function SecurityAndApi({ lang }: SecurityAndApiProps) {
                         <FileAudio className="w-5 h-5 animate-pulse" />
                       </div>
                       <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-black truncate text-sahara-onbackground max-w-[200px] sm:max-w-[300px]">
+                        <span className="text-xs font-black truncate text-sahara-onbackground max-w-[180px] sm:max-w-[300px]" title={audioFile.name}>
                           {audioFile.name}
                         </span>
                         <span className="text-[10px] text-sahara-secondary font-mono">

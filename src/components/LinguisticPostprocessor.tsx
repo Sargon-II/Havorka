@@ -1351,7 +1351,7 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
                   return (
                     <div key={name} className="bg-white border border-sahara-surface-dim/35 p-3 rounded-lg space-y-2 shadow-3xs hover:border-sahara-primary/35 transition-all">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-sans text-xs font-black text-sahara-onbackground block truncate">
+                        <span className="font-sans text-xs font-black text-sahara-onbackground block break-words min-w-0 flex-1" title={name}>
                           {name}
                         </span>
                         <button
@@ -1478,16 +1478,16 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
                     onClick={() => loadFromHistory(item)}
                     className="group flex items-center justify-between p-2.5 rounded-lg border bg-white hover:bg-sahara-clay/10 border-sahara-surface-dim/30 hover:border-sahara-primary/50 transition-all cursor-pointer shadow-3xs"
                   >
-                    <div className="truncate flex-1 pr-2">
-                      <div className="flex items-center gap-1.5 truncate">
-                        <span className="font-sans text-xs font-black text-sahara-onbackground leading-tight">
+                    <div className="flex-1 pr-2 min-w-0" title={`${item.metadata.informantCode || 'Без шифра'} — ${item.metadata.location || '—'}`}>
+                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                        <span className="font-sans text-xs font-black text-sahara-onbackground leading-tight break-words">
                           {item.metadata.informantCode || 'Без шифра'}
                         </span>
                         <span className="text-[9px] font-mono font-medium text-sahara-secondary/40 shrink-0">
                           {item.timestamp.split(',')[0]}
                         </span>
                       </div>
-                      <p className="font-sans text-[10px] text-sahara-secondary/65 truncate mt-0.5">
+                      <p className="font-sans text-[10px] text-sahara-secondary/65 break-words mt-0.5">
                         {item.metadata.location || '—'}
                       </p>
                     </div>
@@ -2054,7 +2054,7 @@ export default function LinguisticPostprocessor({ researcherName, onResearcherNa
                             
                             <button
                               onClick={() => startEditSegment(seg)}
-                              className="font-sans text-xs font-black uppercase tracking-widest text-sahara-primary hover:text-[#86400f] transition-colors whitespace-nowrap cursor-pointer mt-1 sm:mt-0"
+                              className="font-sans text-xs font-black uppercase tracking-widest text-sahara-primary hover:text-[#86400f] transition-colors cursor-pointer mt-1 sm:mt-0 break-words"
                             >
                               {t.lpEditLabel}
                             </button>

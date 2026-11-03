@@ -1941,7 +1941,7 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                                 )}
                               </div>
                               <div className="flex-1 space-y-1">
-                                <h4 className="font-serif text-sm font-bold text-sahara-primary truncate">
+                                <h4 className="font-serif text-sm font-bold text-sahara-primary break-words">
                                   {photo.title}
                                 </h4>
                                 <p className="text-[10px] text-stone-500 font-serif">
@@ -2056,13 +2056,13 @@ export default function QuestionnaireBuilder({ questionnaire, onChange, lang, re
                           <span className="block text-[9.5px] uppercase font-mono font-bold text-sahara-secondary tracking-tight">
                             Вопрос {q.blockIndex + 1}.{q.questionIndexInBlock + 1}
                           </span>
-                          <span className={`block font-serif text-xs leading-relaxed truncate ${
+                          <span className={`block font-serif text-xs leading-relaxed break-words ${
                             active ? 'font-bold text-sahara-primary' : 'text-sahara-onbackground/80'
                           }`}>
                             {q.text}
                           </span>
                           {commentText.trim() && (
-                            <span className="block text-[9px] text-[#B66029] italic truncate mt-0.5">
+                            <span className="block text-[9px] text-[#B66029] italic break-words mt-0.5">
                               * Note: {commentText}
                             </span>
                           )}

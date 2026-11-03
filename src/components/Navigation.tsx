@@ -91,7 +91,7 @@ export default function Navigation({ activeTab, setActiveTab, researcherName, se
                     }`}>
                       {item.idxStr}
                     </span>
-                    <h3 className={`text-lg lg:text-xl font-serif tracking-tight mt-0.5 transition-all truncate ${
+                    <h3 className={`text-lg lg:text-xl font-serif tracking-tight mt-0.5 transition-all break-words ${
                       isActive ? 'font-black pl-1 text-sahara-primary' : 'text-sahara-secondary/80 group-hover:text-sahara-onbackground'
                     }`}>
                       {item.label}
@@ -137,8 +137,9 @@ export default function Navigation({ activeTab, setActiveTab, researcherName, se
                 </button>
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-1 group/edit">
-                <span className="font-sans text-sm font-black leading-tight truncate text-sahara-onbackground hover:text-sahara-primary transition-colors cursor-pointer"
+              <div className="flex items-center justify-between gap-1 group/edit min-w-0">
+                <span className="font-sans text-sm font-black leading-tight break-words text-sahara-onbackground hover:text-sahara-primary transition-colors cursor-pointer min-w-0"
+                  title={researcherName}
                   onClick={() => {
                     const isPlaceHolder = researcherName === 'Введите ФИО' || researcherName === 'Увядзіце ПІБ' || researcherName === '请输入姓名';
                     setTempName(isPlaceHolder ? '' : researcherName);
@@ -152,7 +153,7 @@ export default function Navigation({ activeTab, setActiveTab, researcherName, se
                     setTempName(isPlaceHolder ? '' : researcherName);
                     setIsEditing(true);
                   }}
-                  className="opacity-50 hover:opacity-100 text-sahara-secondary transition-opacity cursor-pointer p-0.5"
+                  className="opacity-50 hover:opacity-100 text-sahara-secondary transition-opacity cursor-pointer p-0.5 shrink-0"
                   title={t.changeName}
                 >
                   <Edit2 className="w-3 h-3" />
@@ -167,7 +168,7 @@ export default function Navigation({ activeTab, setActiveTab, researcherName, se
       {/* Bottom Navigation for Mobile */}
       <nav
         style={{ '--color-sahara-primary': activeColor } as React.CSSProperties}
-        className="md:hidden fixed bottom-0 left-0 right-0 bg-[#f5f3f3] border-t border-sahara-surface-dim/40 text-sahara-secondary z-50 flex justify-around items-center px-1 py-3 pb-safe shadow-md"
+        className="md:hidden fixed bottom-0 left-0 right-0 bg-[#f5f3f3] border-t border-sahara-surface-dim/40 text-sahara-secondary z-50 flex justify-around items-center px-0.5 py-2.5 pb-safe shadow-md"
       >
         {navItems.map((item) => {
           const isActive = activeTab === item.id;
@@ -176,12 +177,12 @@ export default function Navigation({ activeTab, setActiveTab, researcherName, se
               key={item.id}
               id={`m-nav-${item.id}`}
               onClick={() => setActiveTab(item.id)}
-              className={`flex flex-col items-center justify-center flex-1 py-1 rounded-md transition-colors ${
+              className={`flex flex-col items-center justify-center flex-1 py-1 px-0.5 rounded-md transition-colors min-w-0 ${
                 isActive ? 'text-sahara-primary font-boldScale' : 'text-sahara-secondary/60 hover:text-sahara-onbackground'
               }`}
             >
               <span className="text-[10px] uppercase font-mono tracking-widest">{item.idxStr}</span>
-              <span className="text-[12px] font-sans font-bold tracking-tight mt-0.5">{item.label}</span>
+              <span className="text-[11px] sm:text-[12px] font-sans font-bold tracking-tight mt-0.5 text-center leading-tight break-words min-w-0 line-clamp-2">{item.label}</span>
               {isActive && <div className="w-6 h-[2px] bg-sahara-primary mt-1" />}
             </button>
           );
