@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Гаворка</title>
+  <desc id="desc">Знак приложения для записи и исследования устной речи: две реплики, соединённые звуковой волной.</desc>
+  <rect width="512" height="512" rx="112" fill="#fbf9f9"/>
+
+  <!-- Back conversation bubble -->
+  <path d="M116 115h214c35 0 58 23 58 58v92c0 35-23 58-58 58h-32l-52 47v-47H116c-35 0-58-23-58-58v-92c0-35 23-58 58-58Z"
+        fill="#ffdbca" stroke="#765848" stroke-width="10" stroke-linejoin="round"/>
+
+  <!-- Foreground speech bubble: a clear, confident primary silhouette -->
+  <path d="M178 154h218c34 0 58 24 58 58v91c0 34-24 58-58 58h-48l-58 52v-52H178c-34 0-58-24-58-58v-91c0-34 24-58 58-58Z"
+        fill="#974811" stroke="#974811" stroke-width="8" stroke-linejoin="round"/>
+
+  <!-- Voice waveform, balanced and readable at app-icon size -->
+  <g fill="none" stroke="#fbf9f9" stroke-width="17" stroke-linecap="round">
+    <path d="M190 258v-18 M222 278v-58 M254 299v-99 M286 278v-58 M318 258v-18 M350 278v-58"/>
+  </g>
+  <path d="M183 319h174" stroke="#ffdbca" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Small olive accent: a single archival index mark, not decorative folk ornament -->
+  <circle cx="384" cy="185" r="13" fill="#636032"/>
+
+  <!-- Wordmark -->
+  <text x="256" y="448" text-anchor="middle" fill="#1b1c1c"
+        font-family="Lora, Georgia, serif" font-size="47" font-weight="700"
+        letter-spacing="-1.2">Гаворка</text>
+</svg>
