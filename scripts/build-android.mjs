@@ -6,28 +6,34 @@ import process from 'process';
 const isWin = process.platform === 'win32';
 const androidDir = path.resolve(process.cwd(), 'android');
 
-// Automatically detect JAVA_HOME on Windows if not set
-if (isWin && !process.env.JAVA_HOME) {
-  const candidateJdks = [
-
-  ];
-  for (const candidate of candidateJdks) {
-    if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'bin', 'javac.exe'))) {
-      process.env.JAVA_HOME = candidate;
-      process.env.PATH = `${path.join(candidate, 'bin')}${path.delimiter}${process.env.PATH}`;
-      console.log(`[build-android] Using Android Studio JBR: ${candidate}`);
-      break;
+// Ensure JDK from environment is on PATH if JAVA_HOME is set
+if (process.env.JAVA_HOME) {
+  const javaBin = path.join(process.env.JAVA_HOME, 'bin');
+  if (!process.env.PATH?.includes(javaBin)) {
+    process.env.PATH = `${javaBin}${path.delimiter}${process.env.PATH || ''}`;
+  }
+} else if (isWin) {
+  // Fallback detection on Windows when JAVA_HOME is not explicitly set in the shell
+  const programFiles = process.env.ProgramFiles;
+  if (programFiles) {
+    const defaultJbr = path.join(programFiles, 'Android', 'Android Studio', 'jbr');
+    if (fs.existsSync(defaultJbr) && fs.existsSync(path.join(defaultJbr, 'bin', 'javac.exe'))) {
+      process.env.JAVA_HOME = defaultJbr;
+      process.env.PATH = `${path.join(defaultJbr, 'bin')}${path.delimiter}${process.env.PATH || ''}`;
+      console.log(`[build-android] Using detected Android Studio JBR: ${defaultJbr}`);
     }
   }
 }
 
-// Automatically detect ANDROID_HOME on Windows if not set
-if (isWin && !process.env.ANDROID_HOME) {
-  const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
-  const candidateSdk = path.join(localAppData, 'Android', 'Sdk');
-  if (fs.existsSync(candidateSdk)) {
-    process.env.ANDROID_HOME = candidateSdk;
-    console.log(`[build-android] Using detected ANDROID_HOME: ${candidateSdk}`);
+// Fallback detection on Windows when ANDROID_HOME is not explicitly set
+if (isWin && !process.env.ANDROID_HOME && !process.env.ANDROID_SDK_ROOT) {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (localAppData) {
+    const defaultSdk = path.join(localAppData, 'Android', 'Sdk');
+    if (fs.existsSync(defaultSdk)) {
+      process.env.ANDROID_HOME = defaultSdk;
+      console.log(`[build-android] Using detected ANDROID_HOME: ${defaultSdk}`);
+    }
   }
 }
 
@@ -53,12 +59,10 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
-// Locate generated APK and copy to convenient output locations
-const tempDir = process.env.TEMP || process.env.TMP || '/tmp';
+// Locate generated APK and copy to root android directory for convenience
 const possibleApkLocations = [
-  path.join(tempDir, 'havorka_build', 'app', 'outputs', 'apk', 'debug', 'app-debug.apk'),
-  path.join(androidDir, 'build_out', 'app', 'outputs', 'apk', 'debug', 'app-debug.apk'),
   path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk'),
+  path.join(androidDir, 'build_out', 'app', 'outputs', 'apk', 'debug', 'app-debug.apk'),
 ];
 
 for (const apkPath of possibleApkLocations) {

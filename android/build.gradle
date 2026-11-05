@@ -22,8 +22,6 @@ allprojects {
         google()
         mavenCentral()
     }
-    def tempBuildDir = System.getenv("TEMP") ?: System.getenv("TMP") ?: "/tmp"
-    layout.buildDirectory.set(file("${tempBuildDir}/havorka_build/${project.name}"))
 
     tasks.matching { it.name.startsWith("compile") && it.name.contains("Kotlin") }.configureEach {
         it.kotlinOptions.jvmTarget = "21"
@@ -31,6 +29,5 @@ allprojects {
 }
 
 task clean(type: Delete) {
-    def tempBuildDir = System.getenv("TEMP") ?: System.getenv("TMP") ?: "/tmp"
-    delete file("${tempBuildDir}/havorka_build")
+    delete rootProject.buildDir
 }
