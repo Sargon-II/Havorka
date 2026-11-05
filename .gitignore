@@ -7,14 +7,17 @@ coverage/
 .env
 .env.*
 !.env.example
+temp_test/
 
 # Android
 android/.gradle/
 android/build/
 android/build_out/
 android/app/build/
-android/local.properties
-android/*.apk
+local.properties
+**/local.properties
+*.apk
+**/*.apk
 
 # Tauri
 src-tauri/target/
