@@ -11,7 +11,7 @@
 [![Android APK](https://img.shields.io/badge/Android-APK-green.svg)](https://github.com/Sargon-II/Havorka/releases/latest)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg?logo=react&logoColor=black)](https://react.dev/)
 [![Capacitor](https://img.shields.io/badge/Capacitor-8-119EFF.svg?logo=capacitor&logoColor=white)](https://capacitorjs.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 [🇧🇾 Беларуская](#-беларуская) · [🇷🇺 Русский](#-русский) · [🇬🇧 English](#-english) · [🇨🇳 中文](#-中文)
 
@@ -149,7 +149,7 @@ Issues и pull requests приветствуются / Issues and PRs are welcom
 
 ## 📄 Лицензия · License
 
-Проект распространяется под свободной лицензией [MIT](LICENSE).
+Проект распространяется под свободной лицензией [Apache 2.0](LICENSE).
 
 ---
 
