@@ -1,11 +1,14 @@
 import { spawn } from 'child_process';
 import http from 'http';
 import path from 'path';
+import os from 'os';
 import WebSocket from 'ws';
 
-const CHROME_PATH = process.env.CHROME_PATH || 'google-chrome';
+const CHROME_PATH = process.env.CHROME_PATH || (process.platform === 'win32'
+  ? path.join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe')
+  : 'google-chrome');
 const WAV_PATH = path.resolve(process.cwd(), 'temp_test', 'test_audio_440hz.wav');
-const PROFILE_DIR = path.resolve('/tmp', 'chrome_audio_mime_test');
+const PROFILE_DIR = path.resolve(os.tmpdir(), 'chrome_audio_mime_test');
 
 const chromeProc = spawn(CHROME_PATH, [
   '--headless=new',
